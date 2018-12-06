@@ -18,6 +18,7 @@ import (
 )
 
 // UploadConfig generate policies from config
+// for POST requests to S3 using Signing V4.
 type UploadConfig struct {
 	// Required
 	BucketName  string
@@ -28,15 +29,6 @@ type UploadConfig struct {
 	UploadURL  string
 	Expiration time.Duration
 	MetaData   map[string]string
-}
-
-type DeleteConfig struct {
-	// Required
-	BucketName  string
-	ObjectKey   string
-	ContentType string
-	// Optional
-	Expiration time.Duration
 }
 
 // UploadPolicies Amazon s3 upload policies
@@ -69,7 +61,8 @@ var NowTime = func() time.Time {
 
 var lf = []byte{'\n'}
 
-// CreatePolicies create amazon s3 to upload policies return
+// CreateUploadPolicies creates amazon s3 sigv4 compatible
+// policy and signing keys with the signature returns the upload policy.
 // https://docs.aws.amazon.com/ja_jp/AmazonS3/latest/API/sigv4-authentication-HTTPPOST.html
 func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, error) {
 	nowTime := NowTime()
@@ -133,8 +126,8 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 	})
 }
 
-func (c S3) buildCredential(nowTime time.Time) string {
-	return fmt.Sprintf("%s/%s/%s/%s/%s", c.AccessKey, nowTime.UTC().Format(shortTimeFormat), c.Region, serviceName, "aws4_request")
+func (s3 S3) buildCredential(nowTime time.Time) string {
+	return fmt.Sprintf("%s/%s/%s/%s/%s", s3.AccessKey, nowTime.UTC().Format(shortTimeFormat), s3.Region, serviceName, "aws4_request")
 }
 
 func buildSignature(nowTime time.Time, secretAccessKey string, regionName string, serviceName string) []byte {

@@ -73,9 +73,9 @@ func TestS3_FileDelete(t *testing.T) {
 		{
 			name: "Delete test.txt",
 			fields: fields{
-				AccessKey: os.Getenv("MONGO_PASS"),
-				SecretKey: os.Getenv("AWS_S3_ACCESS_KEY"),
-				Region:    os.Getenv("AWS_S3_ACCESS_KEY"),
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Region:    os.Getenv("AWS_S3_REGION"),
 			},
 			args: args{
 				DeleteInput{

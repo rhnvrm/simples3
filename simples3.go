@@ -13,7 +13,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"net/http/httputil"
 	"time"
 )
 
@@ -26,6 +25,7 @@ type S3 struct {
 	URIFormat string
 }
 
+// UploadInput is passed to FileUpload as a parameter.
 type UploadInput struct {
 	Bucket      string
 	ObjectKey   string
@@ -34,11 +34,13 @@ type UploadInput struct {
 	Body        multipart.File
 }
 
+// DeleteInput is passed to FileDelete as a parameter.
 type DeleteInput struct {
 	Bucket    string
 	ObjectKey string
 }
 
+// New returns an instance of S3.
 func New(region, accessKey, secretKey string) *S3 {
 	return &S3{
 		Region:    region,
@@ -64,6 +66,8 @@ func detectFileSize(body multipart.File) int64 {
 	return -1
 }
 
+// FileUpload makes a POST call with the file written as multipart
+// and on successful upload, checks for 200 OK.
 func (s3 *S3) FileUpload(u UploadInput) error {
 	policies, err := s3.CreateUploadPolicies(UploadConfig{
 		UploadURL:   fmt.Sprintf(s3.URIFormat, s3.Region, u.Bucket),
@@ -84,7 +88,6 @@ func (s3 *S3) FileUpload(u UploadInput) error {
 	w := multipart.NewWriter(&b)
 
 	for k, v := range policies.Form {
-		log.Println(k, v)
 		if err := w.WriteField(k, v); err != nil {
 			return err
 		}
@@ -130,12 +133,13 @@ func (s3 *S3) FileUpload(u UploadInput) error {
 	return nil
 }
 
+// FileDelete makes a POST call with the file written as multipart
+// and on successful upload, checks for 204 No Content.
 func (s3 *S3) FileDelete(u DeleteInput) error {
 	url := fmt.Sprintf(
 		s3.URIFormat+"/%s",
 		s3.Region, u.Bucket, u.ObjectKey,
 	)
-	log.Println(url)
 	req, err := http.NewRequest(
 		"DELETE", url, nil,
 	)
@@ -175,9 +179,6 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	auth.Write([]byte("Signature=" + fmt.Sprintf("%x", h.Sum(nil))))
 
 	req.Header.Set("Authorization", auth.String())
-
-	dump, err := httputil.DumpRequest(req, true)
-	log.Printf("%q", dump)
 
 	// Submit the request
 	client := &http.Client{}

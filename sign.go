@@ -116,7 +116,7 @@ func writeHeader(w io.Writer, r *http.Request) {
 
 func writeHeaderList(w io.Writer, r *http.Request) {
 	i, a := 0, make([]string, len(r.Header))
-	for k, _ := range r.Header {
+	for k := range r.Header {
 		a[i] = strings.ToLower(k)
 		i++
 	}
