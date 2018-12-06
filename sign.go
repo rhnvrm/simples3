@@ -7,7 +7,6 @@ package simples3
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -21,10 +20,10 @@ import (
 )
 
 func (s3 *S3) signKeys(t time.Time) []byte {
-	h := ghmac([]byte("AWS4"+s3.SecretKey), []byte(t.Format(shortTimeFormat)))
-	h = ghmac(h, []byte(s3.Region))
-	h = ghmac(h, []byte(serviceName))
-	h = ghmac(h, []byte("aws4_request"))
+	h := makeHMac([]byte("AWS4"+s3.SecretKey), []byte(t.Format(shortTimeFormat)))
+	h = makeHMac(h, []byte(s3.Region))
+	h = makeHMac(h, []byte(serviceName))
+	h = makeHMac(h, []byte("aws4_request"))
 	return h
 }
 
@@ -32,27 +31,27 @@ func (s3 *S3) writeRequest(w io.Writer, r *http.Request) {
 	r.Header.Set("host", r.Host)
 
 	w.Write([]byte(r.Method))
-	w.Write(lf)
+	w.Write(newLine)
 	writeURI(w, r)
-	w.Write(lf)
+	w.Write(newLine)
 	writeQuery(w, r)
-	w.Write(lf)
+	w.Write(newLine)
 	writeHeader(w, r)
-	w.Write(lf)
-	w.Write(lf)
+	w.Write(newLine)
+	w.Write(newLine)
 	writeHeaderList(w, r)
-	w.Write(lf)
+	w.Write(newLine)
 	writeBody(w, r)
 }
 
 func (s3 *S3) writeStringToSign(w io.Writer, t time.Time, r *http.Request) {
 	w.Write([]byte("AWS4-HMAC-SHA256"))
-	w.Write(lf)
+	w.Write(newLine)
 	w.Write([]byte(t.Format(amzDateISO8601TimeFormat)))
-	w.Write(lf)
+	w.Write(newLine)
 
 	w.Write([]byte(s3.creds(t)))
-	w.Write(lf)
+	w.Write(newLine)
 
 	h := sha256.New()
 	s3.writeRequest(h, r)
@@ -108,7 +107,7 @@ func writeHeader(w io.Writer, r *http.Request) {
 	sort.Strings(a)
 	for i, s := range a {
 		if i > 0 {
-			w.Write(lf)
+			w.Write(newLine)
 		}
 		io.WriteString(w, s)
 	}
@@ -147,10 +146,4 @@ func writeBody(w io.Writer, r *http.Request) {
 	h := sha256.New()
 	h.Write(b)
 	fmt.Fprintf(w, "%x", h.Sum(nil))
-}
-
-func ghmac(key, data []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(data)
-	return h.Sum(nil)
 }
