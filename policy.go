@@ -59,7 +59,7 @@ var NowTime = func() time.Time {
 	return time.Now()
 }
 
-var lf = []byte{'\n'}
+var newLine = []byte{'\n'}
 
 // CreateUploadPolicies creates amazon s3 sigv4 compatible
 // policy and signing keys with the signature returns the upload policy.
