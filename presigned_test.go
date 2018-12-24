@@ -49,7 +49,7 @@ func TestS3_GeneratePresignedURL_Personal(t *testing.T) {
 	})
 }
 
-func TestS3_GeneratePresignedURL_POST(t *testing.T) {
+func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
 	t.Run("Test", func(t *testing.T) {
 		s := New(
 			os.Getenv("AWS_S3_REGION"),
@@ -67,4 +67,22 @@ func TestS3_GeneratePresignedURL_POST(t *testing.T) {
 			t.Errorf("S3.GeneratePresignedURL() = %v, dontwant %v", got, dontwant)
 		}
 	})
+}
+
+func BenchmarkS3_GeneratePresigned(b *testing.B) {
+	// run the Fib function b.N times
+	s := New(
+		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_S3_ACCESS_KEY"),
+		os.Getenv("AWS_S3_SECRET_KEY"),
+	)
+	for n := 0; n < b.N; n++ {
+		s.GeneratePresignedURL(PresignedInput{
+			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:     "test.txt",
+			Method:        "GET",
+			Timestamp:     NowTime(),
+			ExpirySeconds: 3600,
+		})
+	}
 }
