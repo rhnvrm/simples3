@@ -51,6 +51,7 @@ const (
 	serviceName              = "s3"
 
 	defaultUploadURLFormat = "http://%s.s3.amazonaws.com/" // <bucketName>
+	defaultBucketURLFormat = "%s.s3.amazonaws.com/"        // <bucketName>
 	defaultExpirationHour  = 1 * time.Hour
 )
 
@@ -128,6 +129,10 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 
 func (s3 S3) buildCredential(nowTime time.Time) string {
 	return fmt.Sprintf("%s/%s/%s/%s/%s", s3.AccessKey, nowTime.UTC().Format(shortTimeFormat), s3.Region, serviceName, "aws4_request")
+}
+
+func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) string {
+	return fmt.Sprintf("%s/%s/%s/%s", nowTime.UTC().Format(shortTimeFormat), s3.Region, serviceName, "aws4_request")
 }
 
 func buildSignature(nowTime time.Time, secretAccessKey string, regionName string, serviceName string) []byte {

@@ -18,7 +18,7 @@ defer testTxt.Close()
 
 s3 := simples3.New(Region, AWSAccessKey, AWSSecretKey)
 err := s3.FileUpload(simples3.UploadInput{
-    Bucket:      "zerodha-testbucket",
+    Bucket:      AWSBucket,
     ObjectKey:   "test.txt",
     ContentType: "text/plain",
     FileName:    "test.txt",

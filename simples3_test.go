@@ -35,7 +35,7 @@ func TestS3_FileUpload(t *testing.T) {
 			},
 			args: args{
 				UploadInput{
-					Bucket:      "zerodha-testbucket",
+					Bucket:      os.Getenv("AWS_S3_BUCKET"),
 					ObjectKey:   "test.txt",
 					ContentType: "text/plain",
 					FileName:    "test.txt",
@@ -79,7 +79,7 @@ func TestS3_FileDelete(t *testing.T) {
 			},
 			args: args{
 				DeleteInput{
-					Bucket:    "zerodha-testbucket",
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
 					ObjectKey: "test.txt",
 				},
 			},

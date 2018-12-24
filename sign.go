@@ -45,7 +45,7 @@ func (s3 *S3) writeRequest(w io.Writer, r *http.Request) {
 }
 
 func (s3 *S3) writeStringToSign(w io.Writer, t time.Time, r *http.Request) {
-	w.Write([]byte("AWS4-HMAC-SHA256"))
+	w.Write([]byte(algorithm))
 	w.Write(newLine)
 	w.Write([]byte(t.Format(amzDateISO8601TimeFormat)))
 	w.Write(newLine)
