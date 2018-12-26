@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,22 @@ type UploadInput struct {
 	FileName    string
 	ContentType string
 	Body        multipart.File
+}
+
+// UploadResponse receives the following XML
+// in case of success, since we set a 201 response from S3.
+// Sample response:
+// <PostResponse>
+//     <Location>https://s3.amazonaws.com/link-to-the-file</Location>
+//     <Bucket>s3-bucket</Bucket>
+//     <Key>development/8614bd40-691b-4668-9241-3b342c6cf429/image.jpg</Key>
+//     <ETag>"32-bit-tag"</ETag>
+// </PostResponse>
+type UploadResponse struct {
+	Location string `xml:"Location"`
+	Bucket   string `xml:"Bucket"`
+	Key      string `xml:"Key"`
+	ETag     string `xml:"ETag"`
 }
 
 // DeleteInput is passed to FileDelete as a parameter.
@@ -133,7 +150,7 @@ func detectFileSize(body multipart.File) int64 {
 
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
-func (s3 *S3) FileUpload(u UploadInput) error {
+func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	policies, err := s3.CreateUploadPolicies(UploadConfig{
 		UploadURL:   fmt.Sprintf(s3.URIFormat, s3.Region, u.Bucket),
 		BucketName:  u.Bucket,
@@ -141,12 +158,12 @@ func (s3 *S3) FileUpload(u UploadInput) error {
 		ContentType: u.ContentType,
 		FileSize:    detectFileSize(u.Body),
 		MetaData: map[string]string{
-			"success_action_status": "200",
+			"success_action_status": "201", // returns XML doc on success
 		},
 	})
 
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 
 	var b bytes.Buffer
@@ -154,28 +171,28 @@ func (s3 *S3) FileUpload(u UploadInput) error {
 
 	for k, v := range policies.Form {
 		if err := w.WriteField(k, v); err != nil {
-			return err
+			return UploadResponse{}, err
 		}
 	}
 
 	fw, err := w.CreateFormFile("file", u.FileName)
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 	if _, err = io.Copy(fw, u.Body); err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 
 	// Don't forget to close the multipart writer.
 	// If you don't close it, your request will be missing the terminating boundary.
 	if err := w.Close(); err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 
 	// Now that you have a form, you can submit it to your handler.
 	req, err := http.NewRequest("POST", policies.URL, &b)
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
 	// Don't forget to set the content type, this will contain the boundary.
 	req.Header.Set("Content-Type", w.FormDataContentType())
@@ -184,18 +201,25 @@ func (s3 *S3) FileUpload(u UploadInput) error {
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
-		return err
+		return UploadResponse{}, err
 	}
+	defer res.Body.Close()
 
 	// Check the response
-	if res.Status != "200 OK" {
+	if res.Status != "201 Created" {
 		err = fmt.Errorf("status code: %s", res.Status)
 		data, _ := ioutil.ReadAll(res.Body)
 		log.Printf("response:%s\n", string(data))
-		return err
+		return UploadResponse{}, err
 	}
 
-	return nil
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return UploadResponse{}, err
+	}
+	var ur UploadResponse
+	xml.Unmarshal(data, &ur)
+	return ur, nil
 }
 
 // FileDelete makes a DELETE call with the file written as multipart

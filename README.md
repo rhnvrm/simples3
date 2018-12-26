@@ -24,9 +24,13 @@ s3 := simples3.New(Region, AWSAccessKey, AWSSecretKey)
 // obtain credentials from IAM attached to the instance.
 s3 := simples3.NewUsingIAM(Region)
 
+// Note: Consider adding a testTxt.Seek(0, 0)
+// in case you have read 
+// the body, as the pointer is shared by the library.
+
 // File Upload is as simple as providing the following
 // details.
-err := s3.FileUpload(simples3.UploadInput{
+resp, err := s3.FileUpload(simples3.UploadInput{
     Bucket:      AWSBucket,
     ObjectKey:   "test.txt",
     ContentType: "text/plain",
