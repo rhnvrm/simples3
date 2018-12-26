@@ -260,7 +260,7 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	s3.writeStringToSign(h, t, req)
 
 	auth := bytes.NewBufferString(algorithm)
-	auth.Write([]byte("Credential=" + s3.AccessKey + "/" + s3.creds(t)))
+	auth.Write([]byte(" Credential=" + s3.AccessKey + "/" + s3.creds(t)))
 	auth.Write([]byte{',', ' '})
 	auth.Write([]byte("SignedHeaders="))
 	writeHeaderList(auth, req)

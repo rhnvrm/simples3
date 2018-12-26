@@ -59,7 +59,6 @@ func TestS3_FileUpload(t *testing.T) {
 			args: args{
 				UploadInput{
 					Bucket:      os.Getenv("AWS_S3_BUCKET"),
-					Bucket:      "zerodha-testbucket",
 					ObjectKey:   "xyz/image.png",
 					ContentType: "image/png",
 					FileName:    "avatar.png",
