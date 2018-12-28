@@ -49,6 +49,29 @@ func TestS3_GeneratePresignedURL_Personal(t *testing.T) {
 	})
 }
 
+func TestS3_GeneratePresignedURL_ExtraHeader(t *testing.T) {
+	t.Run("Test", func(t *testing.T) {
+		s := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+		dontwant := ""
+		if got := s.GeneratePresignedURL(PresignedInput{
+			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:     "test2.txt",
+			Method:        "GET",
+			Timestamp:     NowTime(),
+			ExpirySeconds: 3600,
+			ExtraHeaders: map[string]string{
+				"x-amz-meta-test": "test",
+			},
+		}); got == dontwant {
+			t.Errorf("S3.GeneratePresignedURL() = %v, dontwant %v", got, dontwant)
+		}
+	})
+}
+
 func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
 	t.Run("Test", func(t *testing.T) {
 		s := New(

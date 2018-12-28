@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"time"
@@ -89,9 +88,12 @@ func New(region, accessKey, secretKey string) *S3 {
 // NewUsingIAM automatically generates an Instance of S3
 // using instance metatdata.
 func NewUsingIAM(region string) (*S3, error) {
+	return newUsingIAMImpl(securityCredentialsURL, region)
+}
 
+func newUsingIAMImpl(baseURL, region string) (*S3, error) {
 	// Get the IAM role
-	resp, err := http.Get(securityCredentialsURL)
+	resp, err := http.Get(baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +107,7 @@ func NewUsingIAM(region string) (*S3, error) {
 		return nil, err
 	}
 
-	resp, err = http.Get(securityCredentialsURL + "/" + string(role))
+	resp, err = http.Get(baseURL + "/" + string(role))
 	if err != nil {
 		return nil, err
 	}
@@ -207,10 +209,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 
 	// Check the response
 	if res.Status != "201 Created" {
-		err = fmt.Errorf("status code: %s", res.Status)
-		data, _ := ioutil.ReadAll(res.Body)
-		log.Printf("response:%s\n", string(data))
-		return UploadResponse{}, err
+		return UploadResponse{}, fmt.Errorf("status code: %s", res.Status)
 	}
 
 	data, err := ioutil.ReadAll(res.Body)
@@ -239,7 +238,6 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	date := req.Header.Get("Date")
 	t := time.Now().UTC()
 	if date != "" {
-		var err error
 		t, err = time.Parse(http.TimeFormat, date)
 		if err != nil {
 			return err
@@ -276,12 +274,9 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 		return err
 	}
 
-	// // Check the response
+	// Check the response
 	if res.Status != "204 No Content" {
-		err = fmt.Errorf("status code: %s", res.Status)
-		data, _ := ioutil.ReadAll(res.Body)
-		log.Printf("response:%s\n", string(data))
-		return err
+		return fmt.Errorf("status code: %s", res.Status)
 	}
 
 	return nil

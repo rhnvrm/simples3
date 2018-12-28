@@ -1,6 +1,9 @@
 package simples3
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -121,5 +124,50 @@ func TestS3_FileDelete(t *testing.T) {
 				t.Errorf("S3.FileDelete() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+type MockClient struct {
+	DoFunc func(req *http.Request) (*http.Response, error)
+}
+
+func (m *MockClient) Do(req *http.Request) (*http.Response, error) {
+	if m.DoFunc != nil {
+		return m.DoFunc(req)
+	}
+	// just in case you want default correct return value
+	return &http.Response{}, nil
+}
+
+func TestS3_NewUsingIAM(t *testing.T) {
+	var (
+		iam  = `test-new-s3-using-iam`
+		resp = `{"Code" : "Success","LastUpdated" : "2018-12-24T10:18:01Z",
+				"Type" : "AWS-HMAC","AccessKeyId" : "abc",
+				"SecretAccessKey" : "abc","Token" : "abc",
+				"Expiration" : "2018-12-24T16:24:59Z"}`
+	)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected 'GET' request, got '%s'", r.Method)
+		}
+		if r.URL.EscapedPath() == "/" {
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, iam)
+		}
+		if r.URL.EscapedPath() == "/"+iam {
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, resp)
+		}
+	}))
+	defer ts.Close()
+
+	s3, err := newUsingIAMImpl(ts.URL, "abc")
+	if err != nil {
+		t.Errorf("S3.FileDelete() error = %v", err)
+	}
+	if s3.AccessKey != "abc" && s3.SecretKey != "abc" && s3.Region != "abc" {
+		t.Errorf("S3.FileDelete() got = %v", s3)
 	}
 }
