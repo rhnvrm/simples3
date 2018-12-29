@@ -14,6 +14,7 @@ import (
 
 const (
 	defaultPresignedURLFormat = "%s.s3.amazonaws.com" // <bucket>
+	defaultProtocol           = "https://"            // <bucket>
 )
 
 // PresignedInput is passed to GeneratePresignedURL as a parameter.
@@ -24,6 +25,7 @@ type PresignedInput struct {
 	Timestamp     time.Time
 	ExtraHeaders  map[string]string
 	ExpirySeconds int
+	Protocol      string
 }
 
 // GeneratePresignedURL creates a Presigned URL that can be used
@@ -31,11 +33,17 @@ type PresignedInput struct {
 // (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
 func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	var (
-		nowTime = in.Timestamp.UTC()
-		cred    = fmt.Sprintf("%s/"+s3.buildCredentialWithoutKey(nowTime), s3.AccessKey)
-		amzdate = nowTime.Format(amzDateISO8601TimeFormat)
-		expiry  = strconv.Itoa(in.ExpirySeconds)
+		nowTime  = in.Timestamp.UTC()
+		cred     = fmt.Sprintf("%s/"+s3.buildCredentialWithoutKey(nowTime), s3.AccessKey)
+		amzdate  = nowTime.Format(amzDateISO8601TimeFormat)
+		expiry   = strconv.Itoa(in.ExpirySeconds)
+		protocol = in.Protocol
 	)
+
+	// Set the protocol as default if not provided.
+	if protocol == "" {
+		protocol = defaultProtocol
+	}
 
 	// Add host to Headers
 	signedHeaders := in.ExtraHeaders
@@ -151,7 +159,7 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	b.Reset()
 
 	// Start Generating URL
-	fmt.Fprintf(&b, "http://"+defaultPresignedURLFormat+"/", in.Bucket)
+	fmt.Fprintf(&b, protocol+defaultPresignedURLFormat+"/", in.Bucket)
 	fmt.Fprintf(&b, "%s?", in.ObjectKey)
 
 	// We don't need to have a sorted order here,
