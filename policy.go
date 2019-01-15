@@ -51,7 +51,6 @@ const (
 	serviceName              = "s3"
 
 	defaultUploadURLFormat = "http://%s.s3.amazonaws.com/" // <bucketName>
-	defaultBucketURLFormat = "%s.s3.amazonaws.com/"        // <bucketName>
 	defaultExpirationHour  = 1 * time.Hour
 )
 

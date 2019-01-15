@@ -127,18 +127,6 @@ func TestS3_FileDelete(t *testing.T) {
 	}
 }
 
-type MockClient struct {
-	DoFunc func(req *http.Request) (*http.Response, error)
-}
-
-func (m *MockClient) Do(req *http.Request) (*http.Response, error) {
-	if m.DoFunc != nil {
-		return m.DoFunc(req)
-	}
-	// just in case you want default correct return value
-	return &http.Response{}, nil
-}
-
 func TestS3_NewUsingIAM(t *testing.T) {
 	var (
 		iam  = `test-new-s3-using-iam`

@@ -27,6 +27,7 @@ type S3 struct {
 	AccessKey string
 	SecretKey string
 	Region    string
+	Client    *http.Client
 
 	URIFormat string
 }
@@ -135,6 +136,13 @@ func newUsingIAMImpl(baseURL, region string) (*S3, error) {
 	}, nil
 }
 
+func (s3 *S3) getClient() *http.Client {
+	if s3.Client == nil {
+		return http.DefaultClient
+	}
+	return s3.Client
+}
+
 func detectFileSize(body multipart.File) int64 {
 	switch r := body.(type) {
 	case io.Seeker:
@@ -148,6 +156,18 @@ func detectFileSize(body multipart.File) int64 {
 		return n
 	}
 	return -1
+}
+
+// SetClient can be used to set the http client to be
+// used by the package. If client passed is nil,
+// http.DefaultClient is used.
+func (s3 *S3) SetClient(client *http.Client) *S3 {
+	if client != nil {
+		s3.Client = client
+	} else {
+		s3.Client = http.DefaultClient
+	}
+	return s3
 }
 
 // FileUpload makes a POST call with the file written as multipart
@@ -172,7 +192,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	w := multipart.NewWriter(&b)
 
 	for k, v := range policies.Form {
-		if err := w.WriteField(k, v); err != nil {
+		if err = w.WriteField(k, v); err != nil {
 			return UploadResponse{}, err
 		}
 	}
@@ -200,7 +220,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	// Submit the request
-	client := &http.Client{}
+	client := s3.getClient()
 	res, err := client.Do(req)
 	if err != nil {
 		return UploadResponse{}, err
@@ -268,7 +288,7 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	req.Header.Set("Authorization", auth.String())
 
 	// Submit the request
-	client := &http.Client{}
+	client := s3.getClient()
 	res, err := client.Do(req)
 	if err != nil {
 		return err
