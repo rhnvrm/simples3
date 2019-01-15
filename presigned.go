@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
@@ -13,8 +12,8 @@ import (
 )
 
 const (
-	defaultPresignedURLFormat = "%s.s3.amazonaws.com" // <bucket>
-	defaultProtocol           = "https://"            // <bucket>
+	defaultPresignedHost = "s3.amazonaws.com" // <bucket>
+	defaultProtocol      = "https://"         // <bucket>
 )
 
 // PresignedInput is passed to GeneratePresignedURL as a parameter.
@@ -33,36 +32,50 @@ type PresignedInput struct {
 // (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
 func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	var (
-		nowTime  = in.Timestamp.UTC()
-		cred     = fmt.Sprintf("%s/"+s3.buildCredentialWithoutKey(nowTime), s3.AccessKey)
+		nowTime = in.Timestamp.UTC()
+
 		amzdate  = nowTime.Format(amzDateISO8601TimeFormat)
-		expiry   = strconv.Itoa(in.ExpirySeconds)
-		protocol = in.Protocol
+		protocol = defaultProtocol
 	)
 
+	// Create cred
+	b := bytes.Buffer{}
+	b.WriteString(s3.AccessKey)
+	b.WriteRune('/')
+	b.Write(s3.buildCredentialWithoutKey(nowTime))
+	cred := b.Bytes()
+	b.Reset()
+
 	// Set the protocol as default if not provided.
-	if protocol == "" {
-		protocol = defaultProtocol
+	if in.Protocol != "" {
+		protocol = in.Protocol
 	}
 
 	// Add host to Headers
-	signedHeaders := in.ExtraHeaders
-	if signedHeaders == nil {
-		signedHeaders = map[string]string{}
+	signedHeaders := map[string][]byte{}
+	for k, v := range in.ExtraHeaders {
+		signedHeaders[k] = []byte(v)
 	}
-	signedHeaders["host"] = fmt.Sprintf(defaultPresignedURLFormat, in.Bucket)
+	host := bytes.Buffer{}
+	host.WriteString(in.Bucket)
+	host.WriteRune('.')
+	host.WriteString(defaultPresignedHost)
+	signedHeaders["host"] = host.Bytes()
 
 	// Start Canonical Request Formation
-	h := sha256.New()                     // We write the canonical request directly to the SHA256 hash.
-	fmt.Fprintf(h, "%s\n", in.Method)     // HTTP Verb
-	fmt.Fprintf(h, "/%s\n", in.ObjectKey) // CanonicalURL
+	h := sha256.New()          // We write the canonical request directly to the SHA256 hash.
+	h.Write([]byte(in.Method)) // HTTP Verb
+	h.Write(newLine)
+	h.Write([]byte{'/'})
+	h.Write([]byte(in.ObjectKey)) // CanonicalURL
+	h.Write(newLine)
 
 	// Start QueryString Params (before SignedHeaders)
 	queryString := map[string]string{
 		"X-Amz-Algorithm":  algorithm,
-		"X-Amz-Credential": cred,
+		"X-Amz-Credential": string(cred),
 		"X-Amz-Date":       amzdate,
-		"X-Amz-Expires":    expiry,
+		"X-Amz-Expires":    strconv.Itoa(in.ExpirySeconds),
 	}
 
 	// We need to have a sorted order,
@@ -81,57 +94,66 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 
 	// Proceed to write canonical query params
 	for _, k := range sortedQS {
-		fmt.Fprintf(h, "%s=%s&", url.QueryEscape(k), url.QueryEscape(queryString[k])) // HTTP Verb
+		// HTTP Verb
+		h.Write([]byte(url.QueryEscape(k)))
+		h.Write([]byte{'='})
+		h.Write([]byte(url.QueryEscape(string(queryString[k]))))
+		h.Write([]byte{'&'})
 	}
 
-	fmt.Fprintf(h, "X-Amz-SignedHeaders=")
+	h.Write([]byte("X-Amz-SignedHeaders="))
 	// Add Signed Headers to Query String
 	first := true
-	for k := range sortedSH {
+	for i := 0; i < len(sortedSH); i++ {
 		if first {
-			fmt.Fprintf(h, "%s", url.QueryEscape(sortedSH[k]))
+			h.Write([]byte(url.QueryEscape(sortedSH[i])))
 			first = false
 		} else {
-			fmt.Fprintf(h, "%s", url.QueryEscape(";"+sortedSH[k]))
+			h.Write([]byte{';'})
+			h.Write([]byte(url.QueryEscape(sortedSH[i])))
 		}
 	}
-	fmt.Fprintf(h, "\n")
+	h.Write(newLine)
 	// End QueryString Params
 
 	// Start Canonical Headers
-	for _, k := range sortedSH {
-		fmt.Fprintf(h, "%s:%s\n", strings.ToLower(k), strings.TrimSpace(signedHeaders[k]))
+	for i := 0; i < len(sortedSH); i++ {
+		h.Write([]byte(strings.ToLower(sortedSH[i])))
+		h.Write([]byte{':'})
+		h.Write([]byte(strings.TrimSpace(string(signedHeaders[sortedSH[i]]))))
+		h.Write(newLine)
 	}
-	fmt.Fprintf(h, "\n")
+	h.Write(newLine)
 	// End Canonical Headers
 
 	// Start Signed Headers
 	first = true
-	for k := range sortedSH {
+	for i := 0; i < len(sortedSH); i++ {
 		if first {
-			fmt.Fprintf(h, "%s", url.QueryEscape(sortedSH[k]))
+			h.Write([]byte(url.QueryEscape(sortedSH[i])))
 			first = false
 		} else {
-			fmt.Fprintf(h, "%s", url.QueryEscape(";"+sortedSH[k]))
+			h.Write([]byte{';'})
+			h.Write([]byte(url.QueryEscape(sortedSH[i])))
 		}
 	}
-	fmt.Fprintf(h, "\n")
+	h.Write(newLine)
 	// End Canonical Headers
 
 	// Mention Unsigned Payload
-	fmt.Fprintf(h, "UNSIGNED-PAYLOAD")
+	h.Write([]byte("UNSIGNED-PAYLOAD"))
 
 	// canonicalReq := h.Bytes()
-	// Reset Buffer to create StringToSign
-	var b bytes.Buffer
-
 	// Start StringToSign
-	fmt.Fprintf(&b, "%s\n", algorithm)                             // Algo
-	fmt.Fprintf(&b, "%s\n", amzdate)                               // Date
-	fmt.Fprintf(&b, "%s\n", s3.buildCredentialWithoutKey(nowTime)) //Cred
+	b.WriteString(algorithm)
+	b.WriteRune('\n')
+	b.WriteString(amzdate)
+	b.WriteRune('\n')
+	b.Write(s3.buildCredentialWithoutKey(nowTime))
+	b.WriteRune('\n')
 
 	hashed := hex.EncodeToString(h.Sum(nil))
-	fmt.Fprintf(&b, "%s", hashed)
+	b.WriteString(hashed)
 
 	stringToSign := b.Bytes()
 
@@ -155,29 +177,40 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	signature := hex.EncodeToString(signedStrToSign)
 	// End Signature
 
-	// Reset Buffer to create URl
+	// Reset Buffer to create URL
 	b.Reset()
 
 	// Start Generating URL
-	fmt.Fprintf(&b, protocol+defaultPresignedURLFormat+"/", in.Bucket)
-	fmt.Fprintf(&b, "%s?", in.ObjectKey)
+	b.WriteString(protocol)
+	b.WriteString(in.Bucket)
+	b.WriteRune('.')
+	b.WriteString(defaultPresignedHost)
+	b.WriteRune('/')
+	b.WriteString(in.ObjectKey)
+	b.WriteRune('?')
 
 	// We don't need to have a sorted order here,
 	// but just to preserve tests.
-	for _, k := range sortedQS {
-		fmt.Fprintf(&b, "%s=%s&", url.QueryEscape(k), url.QueryEscape(queryString[k])) // HTTP Verb
+	for i := 0; i < len(sortedQS); i++ {
+		b.WriteString(url.QueryEscape(sortedQS[i]))
+		b.WriteRune('=')
+		b.WriteString(url.QueryEscape(string(queryString[sortedQS[i]])))
+		b.WriteRune('&')
 	}
-	fmt.Fprintf(&b, "%s=", "X-Amz-SignedHeaders")
+	b.WriteString("X-Amz-SignedHeaders")
+	b.WriteRune('=')
 	first = true
-	for k := range sortedSH {
+	for i := 0; i < len(sortedSH); i++ {
 		if first {
-			fmt.Fprintf(&b, "%s", url.QueryEscape(sortedSH[k]))
+			b.WriteString(url.QueryEscape(sortedSH[i]))
 			first = false
 		} else {
-			fmt.Fprintf(&b, "%s", url.QueryEscape(";"+sortedSH[k]))
+			b.WriteRune(';')
+			b.WriteString(url.QueryEscape(sortedSH[i]))
 		}
 	}
-	fmt.Fprintf(&b, "&X-Amz-Signature=%s", signature)
+	b.WriteString("&X-Amz-Signature=")
+	b.WriteString(signature)
 
 	return b.String()
 }

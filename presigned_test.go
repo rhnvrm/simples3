@@ -99,6 +99,9 @@ func BenchmarkS3_GeneratePresigned(b *testing.B) {
 		os.Getenv("AWS_S3_ACCESS_KEY"),
 		os.Getenv("AWS_S3_SECRET_KEY"),
 	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),

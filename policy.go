@@ -8,6 +8,7 @@
 package simples3
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -66,7 +67,7 @@ var newLine = []byte{'\n'}
 // https://docs.aws.amazon.com/ja_jp/AmazonS3/latest/API/sigv4-authentication-HTTPPOST.html
 func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, error) {
 	nowTime := NowTime()
-	credential := s3.buildCredential(nowTime)
+	credential := string(s3.buildCredential(nowTime))
 	data, err := buildUploadSign(nowTime, credential, uploadConfig)
 	if err != nil {
 		return UploadPolicies{}, err
@@ -126,12 +127,30 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 	})
 }
 
-func (s3 S3) buildCredential(nowTime time.Time) string {
-	return fmt.Sprintf("%s/%s/%s/%s/%s", s3.AccessKey, nowTime.UTC().Format(shortTimeFormat), s3.Region, serviceName, "aws4_request")
+func (s3 S3) buildCredential(nowTime time.Time) []byte {
+	var b bytes.Buffer
+	b.WriteString(s3.AccessKey)
+	b.WriteRune('/')
+	b.WriteString(nowTime.UTC().Format(shortTimeFormat))
+	b.WriteRune('/')
+	b.WriteString(s3.Region)
+	b.WriteRune('/')
+	b.WriteString(serviceName)
+	b.WriteRune('/')
+	b.WriteString("aws4_request")
+	return b.Bytes()
 }
 
-func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) string {
-	return fmt.Sprintf("%s/%s/%s/%s", nowTime.UTC().Format(shortTimeFormat), s3.Region, serviceName, "aws4_request")
+func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) []byte {
+	var b bytes.Buffer
+	b.WriteString(nowTime.UTC().Format(shortTimeFormat))
+	b.WriteRune('/')
+	b.WriteString(s3.Region)
+	b.WriteRune('/')
+	b.WriteString(serviceName)
+	b.WriteRune('/')
+	b.WriteString("aws4_request")
+	return b.Bytes()
 }
 
 func buildSignature(nowTime time.Time, secretAccessKey string, regionName string, serviceName string) []byte {
