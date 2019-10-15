@@ -22,3 +22,5 @@
 .vscode/
 tsconfig.json
 jsconfig.json
+
+.env

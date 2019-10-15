@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+type tConfig struct {
+	AccessKey string
+	SecretKey string
+	Endpoint  string
+	Region    string
+}
+
 func TestS3_FileUpload(t *testing.T) {
 	testTxt, err := os.Open("test.txt")
 	if err != nil {
@@ -20,25 +27,21 @@ func TestS3_FileUpload(t *testing.T) {
 	}
 	defer testPng.Close()
 
-	type fields struct {
-		AccessKey string
-		SecretKey string
-		Region    string
-	}
 	type args struct {
 		u UploadInput
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  tConfig
 		args    args
 		wantErr bool
 	}{
 		{
 			name: "Upload test.txt",
-			fields: fields{
+			fields: tConfig{
 				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
 				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
 				Region:    os.Getenv("AWS_S3_REGION"),
 			},
 			args: args{
@@ -54,9 +57,10 @@ func TestS3_FileUpload(t *testing.T) {
 		},
 		{
 			name: "Upload avatar.png",
-			fields: fields{
+			fields: tConfig{
 				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
 				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
 				Region:    os.Getenv("AWS_S3_REGION"),
 			},
 			args: args{
@@ -74,6 +78,7 @@ func TestS3_FileUpload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
+			s3.SetEndpoint(tt.fields.Endpoint)
 			resp, err := s3.FileUpload(tt.args.u)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
@@ -87,25 +92,21 @@ func TestS3_FileUpload(t *testing.T) {
 }
 
 func TestS3_FileDelete(t *testing.T) {
-	type fields struct {
-		AccessKey string
-		SecretKey string
-		Region    string
-	}
 	type args struct {
 		u DeleteInput
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  tConfig
 		args    args
 		wantErr bool
 	}{
 		{
 			name: "Delete test.txt",
-			fields: fields{
+			fields: tConfig{
 				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
 				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
 				Region:    os.Getenv("AWS_S3_REGION"),
 			},
 			args: args{
@@ -120,6 +121,7 @@ func TestS3_FileDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
+			s3.SetEndpoint(tt.fields.Endpoint)
 			if err := s3.FileDelete(tt.args.u); (err != nil) != tt.wantErr {
 				t.Errorf("S3.FileDelete() error = %v, wantErr %v", err, tt.wantErr)
 			}

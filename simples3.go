@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type S3 struct {
 	Region    string
 	Client    *http.Client
 
+	Endpoint  string
 	URIFormat string
 }
 
@@ -143,6 +145,27 @@ func (s3 *S3) getClient() *http.Client {
 	return s3.Client
 }
 
+func (s3 *S3) getURL(bucket string, args ...string) (uri string) {
+	if len(s3.Endpoint) > 0 {
+		uri = defaultProtocol + s3.Endpoint + "/" + bucket
+	} else {
+		uri = fmt.Sprintf(s3.URIFormat, s3.Region, bucket)
+	}
+
+	if len(args) > 0 {
+		uri = uri + "/" + strings.Join(args, "/")
+	}
+	return
+}
+
+// SetEndpoint ...
+func (s3 *S3) SetEndpoint(uri string) *S3 {
+	if len(uri) > 0 {
+		s3.Endpoint = uri
+	}
+	return s3
+}
+
 func detectFileSize(body multipart.File) int64 {
 	switch r := body.(type) {
 	case io.Seeker:
@@ -174,7 +197,7 @@ func (s3 *S3) SetClient(client *http.Client) *S3 {
 // and on successful upload, checks for 200 OK.
 func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	policies, err := s3.CreateUploadPolicies(UploadConfig{
-		UploadURL:   fmt.Sprintf(s3.URIFormat, s3.Region, u.Bucket),
+		UploadURL:   s3.getURL(u.Bucket),
 		BucketName:  u.Bucket,
 		ObjectKey:   u.ObjectKey,
 		ContentType: u.ContentType,
@@ -227,15 +250,15 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	}
 	defer res.Body.Close()
 
-	// Check the response
-	if res.Status != "201 Created" {
-		return UploadResponse{}, fmt.Errorf("status code: %s", res.Status)
-	}
-
 	data, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return UploadResponse{}, err
 	}
+	// Check the response
+	if res.StatusCode != 201 {
+		return UploadResponse{}, fmt.Errorf("status code: %s: %q", res.Status, data)
+	}
+
 	var ur UploadResponse
 	xml.Unmarshal(data, &ur)
 	return ur, nil
@@ -244,12 +267,8 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 // FileDelete makes a DELETE call with the file written as multipart
 // and on successful upload, checks for 204 No Content.
 func (s3 *S3) FileDelete(u DeleteInput) error {
-	url := fmt.Sprintf(
-		s3.URIFormat+"/%s",
-		s3.Region, u.Bucket, u.ObjectKey,
-	)
 	req, err := http.NewRequest(
-		"DELETE", url, nil,
+		"DELETE", s3.getURL(u.Bucket, u.ObjectKey), nil,
 	)
 	if err != nil {
 		return err
@@ -295,9 +314,13 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	}
 
 	// Check the response
-	if res.Status != "204 No Content" {
+	if res.StatusCode != 204 {
 		return fmt.Errorf("status code: %s", res.Status)
 	}
 
 	return nil
+}
+
+func (s3 *S3) Put() {
+
 }

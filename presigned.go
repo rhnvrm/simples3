@@ -25,6 +25,7 @@ type PresignedInput struct {
 	ExtraHeaders  map[string]string
 	ExpirySeconds int
 	Protocol      string
+	Endpoint      string
 }
 
 // GeneratePresignedURL creates a Presigned URL that can be used
@@ -32,11 +33,15 @@ type PresignedInput struct {
 // (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
 func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	var (
-		nowTime = in.Timestamp.UTC()
+		nowTime = NowTime()
 
-		amzdate  = nowTime.Format(amzDateISO8601TimeFormat)
 		protocol = defaultProtocol
+		endpoint = defaultPresignedHost
 	)
+	if !in.Timestamp.IsZero() {
+		nowTime = in.Timestamp.UTC()
+	}
+	amzdate := nowTime.Format(amzDateISO8601TimeFormat)
 
 	// Create cred
 	b := bytes.Buffer{}
@@ -50,6 +55,9 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	if in.Protocol != "" {
 		protocol = in.Protocol
 	}
+	if in.Endpoint != "" {
+		endpoint = in.Endpoint
+	}
 
 	// Add host to Headers
 	signedHeaders := map[string][]byte{}
@@ -59,7 +67,7 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	host := bytes.Buffer{}
 	host.WriteString(in.Bucket)
 	host.WriteRune('.')
-	host.WriteString(defaultPresignedHost)
+	host.WriteString(endpoint)
 	signedHeaders["host"] = host.Bytes()
 
 	// Start Canonical Request Formation
@@ -184,7 +192,7 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	b.WriteString(protocol)
 	b.WriteString(in.Bucket)
 	b.WriteRune('.')
-	b.WriteString(defaultPresignedHost)
+	b.WriteString(endpoint)
 	b.WriteRune('/')
 	b.WriteString(in.ObjectKey)
 	b.WriteRune('?')
