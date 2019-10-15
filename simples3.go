@@ -320,7 +320,3 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 
 	return nil
 }
-
-func (s3 *S3) Put() {
-
-}
