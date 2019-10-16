@@ -45,7 +45,7 @@ type PolicyJSON struct {
 }
 
 const (
-	expirationTimeFormat     = "20060102T150405Z"
+	expirationTimeFormat     = "2006-01-02T15:04:05Z07:00"
 	amzDateISO8601TimeFormat = "20060102T150405Z"
 	shortTimeFormat          = "20060102"
 	algorithm                = "AWS4-HMAC-SHA256"
