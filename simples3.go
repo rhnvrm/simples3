@@ -40,7 +40,7 @@ type UploadInput struct {
 	ObjectKey   string
 	FileName    string
 	ContentType string
-	Body        multipart.File
+	Body        io.ReadSeeker
 }
 
 // UploadResponse receives the following XML
@@ -166,19 +166,18 @@ func (s3 *S3) SetEndpoint(uri string) *S3 {
 	return s3
 }
 
-func detectFileSize(body multipart.File) int64 {
-	switch r := body.(type) {
-	case io.Seeker:
-		pos, _ := r.Seek(0, 1)
-		defer r.Seek(pos, 0)
-
-		n, err := r.Seek(0, 2)
-		if err != nil {
-			return -1
-		}
-		return n
+func detectFileSize(body io.Seeker) (int64, error) {
+	pos, err := body.Seek(0, 1)
+	if err != nil {
+		return -1, err
 	}
-	return -1
+	defer body.Seek(pos, 0)
+
+	n, err := body.Seek(0, 2)
+	if err != nil {
+		return -1, err
+	}
+	return n, nil
 }
 
 // SetClient can be used to set the http client to be
@@ -196,12 +195,16 @@ func (s3 *S3) SetClient(client *http.Client) *S3 {
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
 func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
+	fSize, err := detectFileSize(u.Body)
+	if err != nil {
+		return UploadResponse{}, err
+	}
 	policies, err := s3.CreateUploadPolicies(UploadConfig{
 		UploadURL:   s3.getURL(u.Bucket),
 		BucketName:  u.Bucket,
 		ObjectKey:   u.ObjectKey,
 		ContentType: u.ContentType,
-		FileSize:    detectFileSize(u.Body),
+		FileSize:    fSize,
 		MetaData: map[string]string{
 			"success_action_status": "201", // returns XML doc on success
 		},
