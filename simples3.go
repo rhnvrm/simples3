@@ -158,7 +158,8 @@ func (s3 *S3) getURL(bucket string, args ...string) (uri string) {
 	return
 }
 
-// SetEndpoint ...
+// SetEndpoint can be used to the set a custom endpoint for
+// using an alternate instance compatible with the s3 API.
 func (s3 *S3) SetEndpoint(uri string) *S3 {
 	if len(uri) > 0 {
 		s3.Endpoint = uri

@@ -13,7 +13,7 @@ go get github.com/rhnvrm/simples3
 ## Example
 
 ```go
-testTxt, _ := os.Open("test.txt")
+testTxt, _ := os.Open("testdata/test.txt")
 defer testTxt.Close()
 
 // Create an instance of the package
@@ -23,6 +23,9 @@ s3 := simples3.New(Region, AWSAccessKey, AWSSecretKey)
 // or you can use this on an EC2 instance to 
 // obtain credentials from IAM attached to the instance.
 s3 := simples3.NewUsingIAM(Region)
+
+// You can also set a custom endpoint to a compatible s3 instance. 
+s3.SetEndpoint(CustomEndpoint)
 
 // Note: Consider adding a testTxt.Seek(0, 0)
 // in case you have read 

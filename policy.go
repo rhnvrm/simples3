@@ -55,8 +55,8 @@ const (
 	defaultExpirationHour  = 1 * time.Hour
 )
 
-// NowTime mockable time.Now()
-var NowTime = func() time.Time {
+// nowTime mockable time.Now()
+var nowTime = func() time.Time {
 	return time.Now().UTC()
 }
 
@@ -66,7 +66,7 @@ var newLine = []byte{'\n'}
 // policy and signing keys with the signature returns the upload policy.
 // https://docs.aws.amazon.com/ja_jp/AmazonS3/latest/API/sigv4-authentication-HTTPPOST.html
 func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, error) {
-	nowTime := NowTime()
+	nowTime := nowTime()
 	credential := string(s3.buildCredential(nowTime))
 	data, err := buildUploadSign(nowTime, credential, uploadConfig)
 	if err != nil {

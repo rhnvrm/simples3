@@ -33,7 +33,7 @@ type PresignedInput struct {
 // (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
 func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	var (
-		nowTime = NowTime()
+		nowTime = nowTime()
 
 		protocol = defaultProtocol
 		endpoint = defaultPresignedHost

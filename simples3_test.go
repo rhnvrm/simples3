@@ -16,7 +16,7 @@ type tConfig struct {
 }
 
 func TestS3_FileUpload(t *testing.T) {
-	testTxt, err := os.Open("test.txt")
+	testTxt, err := os.Open("testdata/test.txt")
 	if err != nil {
 		return
 	}
@@ -75,7 +75,8 @@ func TestS3_FileUpload(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	for _, tt := range tests {
+	for _, testcase := range tests {
+		tt := testcase
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
 			s3.SetEndpoint(tt.fields.Endpoint)
@@ -118,7 +119,8 @@ func TestS3_FileDelete(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	for _, tt := range tests {
+	for _, testcase := range tests {
+		tt := testcase
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
 			s3.SetEndpoint(tt.fields.Endpoint)
