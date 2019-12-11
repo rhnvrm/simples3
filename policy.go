@@ -45,7 +45,7 @@ type PolicyJSON struct {
 }
 
 const (
-	expirationTimeFormat     = "2006-01-02T15:04:05ZZ07:00"
+	expirationTimeFormat     = "2006-01-02T15:04:05Z07:00"
 	amzDateISO8601TimeFormat = "20060102T150405Z"
 	shortTimeFormat          = "20060102"
 	algorithm                = "AWS4-HMAC-SHA256"
@@ -57,7 +57,7 @@ const (
 
 // NowTime mockable time.Now()
 var NowTime = func() time.Time {
-	return time.Now()
+	return time.Now().UTC()
 }
 
 var newLine = []byte{'\n'}
@@ -131,7 +131,7 @@ func (s3 S3) buildCredential(nowTime time.Time) []byte {
 	var b bytes.Buffer
 	b.WriteString(s3.AccessKey)
 	b.WriteRune('/')
-	b.WriteString(nowTime.UTC().Format(shortTimeFormat))
+	b.WriteString(nowTime.Format(shortTimeFormat))
 	b.WriteRune('/')
 	b.WriteString(s3.Region)
 	b.WriteRune('/')
@@ -143,7 +143,7 @@ func (s3 S3) buildCredential(nowTime time.Time) []byte {
 
 func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) []byte {
 	var b bytes.Buffer
-	b.WriteString(nowTime.UTC().Format(shortTimeFormat))
+	b.WriteString(nowTime.Format(shortTimeFormat))
 	b.WriteRune('/')
 	b.WriteString(s3.Region)
 	b.WriteRune('/')
@@ -154,7 +154,7 @@ func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) []byte {
 }
 
 func buildSignature(nowTime time.Time, secretAccessKey string, regionName string, serviceName string) []byte {
-	shortTime := nowTime.UTC().Format(shortTimeFormat)
+	shortTime := nowTime.Format(shortTimeFormat)
 
 	date := makeHMac([]byte("AWS4"+secretAccessKey), []byte(shortTime))
 	region := makeHMac(date, []byte(regionName))

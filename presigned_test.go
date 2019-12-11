@@ -39,6 +39,7 @@ func TestS3_GeneratePresignedURL_Personal(t *testing.T) {
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test1.txt",
 			Method:        "GET",
 			Timestamp:     NowTime(),
@@ -59,6 +60,7 @@ func TestS3_GeneratePresignedURL_ExtraHeader(t *testing.T) {
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test2.txt",
 			Method:        "GET",
 			Timestamp:     NowTime(),
@@ -82,6 +84,7 @@ func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test2.txt",
 			Method:        "PUT",
 			Timestamp:     NowTime(),
@@ -105,6 +108,7 @@ func BenchmarkS3_GeneratePresigned(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test.txt",
 			Method:        "GET",
 			Timestamp:     NowTime(),
