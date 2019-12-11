@@ -21,7 +21,7 @@ func TestS3_FileUpload(t *testing.T) {
 		return
 	}
 	defer testTxt.Close()
-	testPng, err := os.Open("avatar.png")
+	testPng, err := os.Open("testdata/avatar.png")
 	if err != nil {
 		return
 	}
@@ -114,6 +114,22 @@ func TestS3_FileDelete(t *testing.T) {
 				DeleteInput{
 					Bucket:    os.Getenv("AWS_S3_BUCKET"),
 					ObjectKey: "test.txt",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Delete avatar.png",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				DeleteInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "xyz/image.png",
 				},
 			},
 			wantErr: false,
