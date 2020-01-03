@@ -1,7 +1,9 @@
 package simples3
 
 import (
+	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -87,6 +89,97 @@ func TestS3_FileUpload(t *testing.T) {
 			// check for empty response
 			if (resp == UploadResponse{}) {
 				t.Errorf("S3.FileUpload() returned empty response, %v", resp)
+			}
+		})
+	}
+}
+
+func TestS3_FileDownload(t *testing.T) {
+	testTxt, err := os.Open("testdata/test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testTxt.Close()
+	testTxtData, err := ioutil.ReadAll(testTxt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testPng, err := os.Open("testdata/avatar.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testPng.Close()
+	testPngData, err := ioutil.ReadAll(testPng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type args struct {
+		u DownloadInput
+	}
+	tests := []struct {
+		name         string
+		fields       tConfig
+		args         args
+		wantErr      bool
+		wantResponse []byte
+	}{
+		{
+			name: "txt",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				u: DownloadInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "test.txt",
+				},
+			},
+			wantErr:      false,
+			wantResponse: testTxtData,
+		},
+		{
+			name: "png",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				u: DownloadInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "xyz/image.png",
+				},
+			},
+			wantErr:      false,
+			wantResponse: testPngData,
+		},
+	}
+
+	for _, testcase := range tests {
+		tt := testcase
+		t.Run(tt.name, func(t *testing.T) {
+			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
+			s3.SetEndpoint(tt.fields.Endpoint)
+			resp, err := s3.FileDownload(tt.args.u)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("S3.FileDownload() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			got, err := ioutil.ReadAll(resp)
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+
+			resp.Close()
+
+			if !bytes.Equal(got, tt.wantResponse) {
+				t.Fatalf("S3.FileDownload() = %v, want %v", got, tt.wantResponse)
 			}
 		})
 	}

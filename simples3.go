@@ -34,6 +34,12 @@ type S3 struct {
 	URIFormat string
 }
 
+// DownloadInput is passed to FileUpload as a parameter.
+type DownloadInput struct {
+	Bucket    string
+	ObjectKey string
+}
+
 // UploadInput is passed to FileUpload as a parameter.
 type UploadInput struct {
 	Bucket      string
@@ -193,6 +199,72 @@ func (s3 *S3) SetClient(client *http.Client) *S3 {
 	return s3
 }
 
+func (s3 *S3) signRequest(req *http.Request) error {
+	var (
+		err error
+
+		date = req.Header.Get("Date")
+		t    = time.Now().UTC()
+	)
+
+	if date != "" {
+		t, err = time.Parse(http.TimeFormat, date)
+		if err != nil {
+			return err
+		}
+	}
+	req.Header.Set("Date", t.Format(amzDateISO8601TimeFormat))
+
+	// The x-amz-content-sha256 header is required for all AWS
+	// Signature Version 4 requests. It provides a hash of the
+	// request payload. If there is no payload, you must provide
+	// the hash of an empty string.
+	emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	req.Header.Set("x-amz-content-sha256", emptyhash)
+
+	k := s3.signKeys(t)
+	h := hmac.New(sha256.New, k)
+
+	s3.writeStringToSign(h, t, req)
+
+	auth := bytes.NewBufferString(algorithm)
+	auth.Write([]byte(" Credential=" + s3.AccessKey + "/" + s3.creds(t)))
+	auth.Write([]byte{',', ' '})
+	auth.Write([]byte("SignedHeaders="))
+	writeHeaderList(auth, req)
+	auth.Write([]byte{',', ' '})
+	auth.Write([]byte("Signature=" + fmt.Sprintf("%x", h.Sum(nil))))
+
+	req.Header.Set("Authorization", auth.String())
+	return nil
+}
+
+// FileDownload makes a GET call and returns a io.ReadCloser.
+// After reading the response body, ensure closing the response.
+func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
+	req, err := http.NewRequest(
+		http.MethodGet, s3.getURL(u.Bucket, u.ObjectKey), nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s3.signRequest(req); err != nil {
+		return nil, err
+	}
+
+	res, err := s3.getClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("status code: %s", res.Status)
+	}
+
+	return res.Body, nil
+}
+
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
 func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
@@ -239,7 +311,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	}
 
 	// Now that you have a form, you can submit it to your handler.
-	req, err := http.NewRequest("POST", policies.URL, &b)
+	req, err := http.NewRequest(http.MethodPost, policies.URL, &b)
 	if err != nil {
 		return UploadResponse{}, err
 	}
@@ -272,43 +344,15 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 // and on successful upload, checks for 204 No Content.
 func (s3 *S3) FileDelete(u DeleteInput) error {
 	req, err := http.NewRequest(
-		"DELETE", s3.getURL(u.Bucket, u.ObjectKey), nil,
+		http.MethodDelete, s3.getURL(u.Bucket, u.ObjectKey), nil,
 	)
 	if err != nil {
 		return err
 	}
 
-	date := req.Header.Get("Date")
-	t := time.Now().UTC()
-	if date != "" {
-		t, err = time.Parse(http.TimeFormat, date)
-		if err != nil {
-			return err
-		}
+	if err := s3.signRequest(req); err != nil {
+		return err
 	}
-	req.Header.Set("Date", t.Format(amzDateISO8601TimeFormat))
-
-	// The x-amz-content-sha256 header is required for all AWS
-	// Signature Version 4 requests. It provides a hash of the
-	// request payload. If there is no payload, you must provide
-	// the hash of an empty string.
-	emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	req.Header.Set("x-amz-content-sha256", emptyhash)
-
-	k := s3.signKeys(t)
-	h := hmac.New(sha256.New, k)
-
-	s3.writeStringToSign(h, t, req)
-
-	auth := bytes.NewBufferString(algorithm)
-	auth.Write([]byte(" Credential=" + s3.AccessKey + "/" + s3.creds(t)))
-	auth.Write([]byte{',', ' '})
-	auth.Write([]byte("SignedHeaders="))
-	writeHeaderList(auth, req)
-	auth.Write([]byte{',', ' '})
-	auth.Write([]byte("Signature=" + fmt.Sprintf("%x", h.Sum(nil))))
-
-	req.Header.Set("Authorization", auth.String())
 
 	// Submit the request
 	client := s3.getClient()

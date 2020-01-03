@@ -47,6 +47,14 @@ err := s3.FileDelete(simples3.DeleteInput{
     ObjectKey: "test.txt",
 })
 
+// You can also download the file.
+file, _ := s3.FileDownload(simples3.DownloadInput{
+    Bucket:    os.Getenv("AWS_S3_BUCKET"),
+    ObjectKey: "test.txt",
+})
+data, _ := ioutil.ReadAll(file)
+file.Close()
+
 // You can also use this library to generate
 // Presigned URLs that can for eg. be used to
 // GET/PUT files on S3 through the browser.
