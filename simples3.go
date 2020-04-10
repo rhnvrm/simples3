@@ -30,6 +30,7 @@ type S3 struct {
 	Region    string
 	Client    *http.Client
 
+	Token     string
 	Endpoint  string
 	URIFormat string
 }
@@ -139,6 +140,7 @@ func newUsingIAMImpl(baseURL, region string) (*S3, error) {
 		Region:    region,
 		AccessKey: jsonResp.AccessKeyID,
 		SecretKey: jsonResp.SecretAccessKey,
+		Token:     jsonResp.Token,
 
 		URIFormat: "https://s3.%s.amazonaws.com/%s",
 	}, nil
@@ -169,6 +171,15 @@ func (s3 *S3) getURL(bucket string, args ...string) (uri string) {
 func (s3 *S3) SetEndpoint(uri string) *S3 {
 	if len(uri) > 0 {
 		s3.Endpoint = uri
+	}
+	return s3
+}
+
+// SetToken can be used to set a Temporary Security Credential token obtained from
+// using an IAM role or AWS STS.
+func (s3 *S3) SetToken(token string) *S3 {
+	if token != "" {
+		s3.Token = token
 	}
 	return s3
 }
