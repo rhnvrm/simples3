@@ -85,6 +85,10 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 		"X-Amz-Date":       amzdate,
 		"X-Amz-Expires":    strconv.Itoa(in.ExpirySeconds),
 	}
+	//  include the x-amz-security-token incase we are using IAM role or AWS STS
+	if s3.Token != "" {
+		queryString["X-Amz-Security-Token"] = s3.Token
+	}
 
 	// We need to have a sorted order,
 	// for QueryStrings and SignedHeaders
