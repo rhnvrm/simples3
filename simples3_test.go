@@ -272,3 +272,25 @@ func TestS3_NewUsingIAM(t *testing.T) {
 		t.Errorf("S3.FileDelete() got = %v", s3)
 	}
 }
+
+func TestCustomEndpoint(t *testing.T) {
+	s3 := New("us-east-1", "AccessKey", "SuperSecretKey")
+
+	// no protocol specified, should default to https
+	s3.SetEndpoint("example.com")
+	if s3.getURL("bucket1") != "https://example.com/bucket1" {
+		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
+
+	// explicit http protocol
+	s3.SetEndpoint("http://localhost:9000")
+	if s3.getURL("bucket2") != "http://localhost:9000/bucket2" {
+		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
+
+	// explicit http protocol
+	s3.SetEndpoint("https://example.com")
+	if s3.getURL("bucket3") != "https://example.com/bucket3" {
+		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
+}

@@ -155,7 +155,7 @@ func (s3 *S3) getClient() *http.Client {
 
 func (s3 *S3) getURL(bucket string, args ...string) (uri string) {
 	if len(s3.Endpoint) > 0 {
-		uri = defaultProtocol + s3.Endpoint + "/" + bucket
+		uri = s3.Endpoint + "/" + bucket
 	} else {
 		uri = fmt.Sprintf(s3.URIFormat, s3.Region, bucket)
 	}
@@ -168,8 +168,12 @@ func (s3 *S3) getURL(bucket string, args ...string) (uri string) {
 
 // SetEndpoint can be used to the set a custom endpoint for
 // using an alternate instance compatible with the s3 API.
+// If no protocol is included in the URI, defaults to HTTPS.
 func (s3 *S3) SetEndpoint(uri string) *S3 {
 	if len(uri) > 0 {
+		if !strings.HasPrefix(uri, "http") {
+			uri = "https://" + uri
+		}
 		s3.Endpoint = uri
 	}
 	return s3
