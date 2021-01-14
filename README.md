@@ -2,7 +2,9 @@
 
 ## Overview [![GoDoc](https://godoc.org/github.com/rhnvrm/simples3?status.svg)](https://godoc.org/github.com/rhnvrm/simples3) [![Go Report Card](https://goreportcard.com/badge/github.com/rhnvrm/simples3)](https://goreportcard.com/report/github.com/rhnvrm/simples3) [![GoCover](https://gocover.io/_badge/github.com/rhnvrm/simples3)](https://gocover.io/_badge/github.com/rhnvrm/simples3) [![Zerodha Tech](https://zerodha.tech/static/images/github-badge.svg)](https://zerodha.tech) 
 
-SimpleS3 is a golang library for uploading and deleting objects on S3 buckets using REST API calls or Presigned URLs signed using AWS Signature Version 4.
+SimpleS3 is a golang library for uploading and deleting objects 
+on S3 buckets using REST API calls or Presigned URLs signed 
+using AWS Signature Version 4.
 
 ## Install
 
@@ -71,7 +73,9 @@ url := s.GeneratePresignedURL(PresignedInput{
 
 ## Contributing
 
-You are more than welcome to contribute to this project. Fork and make a Pull Request, or create an Issue if you see any problem or want to propose a feature.
+You are more than welcome to contribute to this project. Fork and make 
+a Pull Request, or create an Issue if you see any problem or want to
+propose a feature.
 
 ## Author
 
@@ -79,4 +83,4 @@ Rohan Verma <hello@rohanverma.net>
 
 ## License
 
-MIT.
+BSD-2-Clause-FreeBSD
