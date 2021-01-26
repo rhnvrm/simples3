@@ -43,11 +43,17 @@ type DownloadInput struct {
 
 // UploadInput is passed to FileUpload as a parameter.
 type UploadInput struct {
+	// essential fields
 	Bucket      string
 	ObjectKey   string
 	FileName    string
 	ContentType string
-	Body        io.ReadSeeker
+
+	// optional fields
+	ContentDisposition string
+	ACL                string
+
+	Body io.ReadSeeker
 }
 
 // UploadResponse receives the following XML
@@ -288,11 +294,13 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		return UploadResponse{}, err
 	}
 	policies, err := s3.CreateUploadPolicies(UploadConfig{
-		UploadURL:   s3.getURL(u.Bucket),
-		BucketName:  u.Bucket,
-		ObjectKey:   u.ObjectKey,
-		ContentType: u.ContentType,
-		FileSize:    fSize,
+		UploadURL:          s3.getURL(u.Bucket),
+		BucketName:         u.Bucket,
+		ObjectKey:          u.ObjectKey,
+		ContentType:        u.ContentType,
+		ContentDisposition: u.ContentDisposition,
+		ACL:                u.ACL,
+		FileSize:           fSize,
 		MetaData: map[string]string{
 			"success_action_status": "201", // returns XML doc on success
 		},
