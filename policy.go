@@ -22,10 +22,12 @@ import (
 // for POST requests to S3 using Signing V4.
 type UploadConfig struct {
 	// Required
-	BucketName  string
-	ObjectKey   string
-	ContentType string
-	FileSize    int64
+	BucketName         string
+	ObjectKey          string
+	ContentType        string
+	ContentDisposition string
+	ACL                string
+	FileSize           int64
 	// Optional
 	UploadURL  string
 	Expiration time.Duration
@@ -84,6 +86,8 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 	if uploadURL == "" {
 		uploadURL = fmt.Sprintf(defaultUploadURLFormat, uploadConfig.BucketName)
 	}
+
+	// essential fields
 	form := map[string]string{
 		"key":              uploadConfig.ObjectKey,
 		"Content-Type":     uploadConfig.ContentType,
@@ -93,6 +97,16 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 		"Policy":           policy,
 		"X-Amz-Signature":  signature,
 	}
+
+	// optional fields
+	if uploadConfig.ContentDisposition != "" {
+		form["Content-Disposition"] = uploadConfig.ContentDisposition
+	}
+
+	if uploadConfig.ACL != "" {
+		form["x-amz-acl"] = uploadConfig.ACL
+	}
+
 	for k, v := range uploadConfig.MetaData {
 		form[k] = v
 	}
