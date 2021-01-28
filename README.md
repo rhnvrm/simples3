@@ -24,7 +24,7 @@ defer testTxt.Close()
 s3 := simples3.New(Region, AWSAccessKey, AWSSecretKey)
 // or you can use this on an EC2 instance to 
 // obtain credentials from IAM attached to the instance.
-s3 := simples3.NewUsingIAM(Region)
+s3, _ := simples3.NewUsingIAM(Region)
 
 // You can also set a custom endpoint to a compatible s3 instance. 
 s3.SetEndpoint(CustomEndpoint)
