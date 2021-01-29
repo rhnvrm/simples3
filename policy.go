@@ -117,6 +117,7 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 }
 
 func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadConfig) ([]byte, error) {
+	// essential conditions
 	conditions := []interface{}{
 		map[string]string{"bucket": uploadConfig.BucketName},
 		map[string]string{"key": uploadConfig.ObjectKey},
@@ -126,6 +127,16 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 		map[string]string{"x-amz-algorithm": algorithm},
 		map[string]string{"x-amz-date": nowTime.Format(amzDateISO8601TimeFormat)},
 	}
+
+	// optional conditions
+	if uploadConfig.ContentDisposition != "" {
+		conditions = append(conditions, map[string]string{"Content-Disposition": uploadConfig.ContentDisposition})
+	}
+
+	if uploadConfig.ACL != "" {
+		conditions = append(conditions, map[string]string{"x-amz-acl": uploadConfig.ACL})
+	}
+
 	for k, v := range uploadConfig.MetaData {
 		conditions = append(conditions, map[string]string{k: v})
 	}
