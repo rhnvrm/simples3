@@ -104,7 +104,7 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 	}
 
 	if uploadConfig.ACL != "" {
-		form["x-amz-acl"] = uploadConfig.ACL
+		form["acl"] = uploadConfig.ACL
 	}
 
 	for k, v := range uploadConfig.MetaData {
@@ -134,7 +134,7 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 	}
 
 	if uploadConfig.ACL != "" {
-		conditions = append(conditions, map[string]string{"x-amz-acl": uploadConfig.ACL})
+		conditions = append(conditions, map[string]string{"acl": uploadConfig.ACL})
 	}
 
 	for k, v := range uploadConfig.MetaData {
