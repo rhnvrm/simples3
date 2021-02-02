@@ -51,7 +51,7 @@ err := s3.FileDelete(simples3.DeleteInput{
 
 // You can also download the file.
 file, _ := s3.FileDownload(simples3.DownloadInput{
-    Bucket:    os.Getenv("AWS_S3_BUCKET"),
+    Bucket:    AWSBucket,
     ObjectKey: "test.txt",
 })
 data, _ := ioutil.ReadAll(file)
@@ -63,7 +63,7 @@ file.Close()
 var time, _ = time.Parse(time.RFC1123, "Fri, 24 May 2013 00:00:00 GMT")
 
 url := s.GeneratePresignedURL(PresignedInput{
-    Bucket:        "examplebucket",
+    Bucket:        AWSBucket,
     ObjectKey:     "test.txt",
     Method:        "GET",
     Timestamp:     time,
