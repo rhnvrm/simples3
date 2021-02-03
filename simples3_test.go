@@ -23,6 +23,12 @@ func TestS3_FileUpload(t *testing.T) {
 		return
 	}
 	defer testTxt.Close()
+	// Note: cannot re-use the same file descriptor due to seeking!
+	testTxtSpecialChars, err := os.Open("testdata/test.txt")
+	if err != nil {
+		return
+	}
+	defer testTxtSpecialChars.Close()
 	testPng, err := os.Open("testdata/avatar.png")
 	if err != nil {
 		return
@@ -72,6 +78,25 @@ func TestS3_FileUpload(t *testing.T) {
 					ContentType: "image/png",
 					FileName:    "avatar.png",
 					Body:        testPng,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Upload special filename txt",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				UploadInput{
+					Bucket:      os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey:   "xyz/example file%with$special&chars(1)?.txt",
+					ContentType: "text/plain",
+					FileName:    "example file%with$special&chars(1)?.txt",
+					Body:        testTxtSpecialChars,
 				},
 			},
 			wantErr: false,
@@ -159,6 +184,23 @@ func TestS3_FileDownload(t *testing.T) {
 			wantErr:      false,
 			wantResponse: testPngData,
 		},
+		{
+			name: "txt-special-filename",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				u: DownloadInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "xyz/example file%with$special&chars(1)?.txt",
+				},
+			},
+			wantErr:      false,
+			wantResponse: testTxtData,
+		},
 	}
 
 	for _, testcase := range tests {
@@ -223,6 +265,22 @@ func TestS3_FileDelete(t *testing.T) {
 				DeleteInput{
 					Bucket:    os.Getenv("AWS_S3_BUCKET"),
 					ObjectKey: "xyz/image.png",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Delete special filename txt",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				DeleteInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "xyz/example file%with$special&chars(1)?.txt",
 				},
 			},
 			wantErr: false,
@@ -292,5 +350,60 @@ func TestCustomEndpoint(t *testing.T) {
 	s3.SetEndpoint("https://example.com")
 	if s3.getURL("bucket3") != "https://example.com/bucket3" {
 		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
+
+	// try with trailing slash
+	s3.SetEndpoint("https://example.com/foobar/")
+	if s3.getURL("bucket4") != "https://example.com/foobar/bucket4" {
+		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
+}
+
+func TestGetURL(t *testing.T) {
+	s3 := New("us-east-1", "AccessKey", "SuperSecretKey")
+
+	type args struct {
+		bucket string
+		params []string
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "getURL: basic test",
+			args: args{
+				bucket: "xyz",
+			},
+			want: "https://s3.us-east-1.amazonaws.com/xyz",
+		},
+		{
+			name: "getURL: multiple parameters",
+			args: args{
+				bucket: "xyz",
+				params: []string{"hello", "world"},
+			},
+			want: "https://s3.us-east-1.amazonaws.com/xyz/hello/world",
+		},
+		{
+			name: "getURL: special characters",
+			args: args{
+				bucket: "xyz",
+				params: []string{"hello, world!", "#!@$%^&*(1).txt"},
+			},
+			want: "https://s3.us-east-1.amazonaws.com/xyz/hello%2C%20world%21/%23%21%40%24%25%5E%26%2A%281%29.txt",
+		},
+	}
+
+	for _, testcase := range tests {
+		tt := testcase
+		t.Run(tt.name, func(t *testing.T) {
+			url := s3.getURL(tt.args.bucket, tt.args.params...)
+			if url != tt.want {
+				t.Errorf("S3.getURL() got = %v, want %v", url, tt.want)
+			}
+		})
 	}
 }
