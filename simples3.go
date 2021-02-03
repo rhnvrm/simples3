@@ -189,6 +189,11 @@ func (s3 *S3) SetEndpoint(uri string) *S3 {
 		if !strings.HasPrefix(uri, "http") {
 			uri = "https://" + uri
 		}
+
+		// make sure there is no trailing slash
+		if uri[len(uri)-1] == '/' {
+			uri = uri[:len(uri)-1]
+		}
 		s3.Endpoint = uri
 	}
 	return s3

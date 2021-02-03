@@ -351,6 +351,12 @@ func TestCustomEndpoint(t *testing.T) {
 	if s3.getURL("bucket3") != "https://example.com/bucket3" {
 		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
 	}
+
+	// try with trailing slash
+	s3.SetEndpoint("https://example.com/foobar/")
+	if s3.getURL("bucket4") != "https://example.com/foobar/bucket4" {
+		t.Errorf("S3.SetEndpoint() got = %v", s3.Endpoint)
+	}
 }
 
 func TestGetURL(t *testing.T) {
