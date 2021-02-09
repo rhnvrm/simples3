@@ -17,9 +17,6 @@ jobs:
       with:
         go-version: 1.15
     - name: Setup minio
-      env:
-        AWS_ACCESS_KEY_ID: minioadmin 
-        AWS_SECRET_ACCESS_KEY: minioadmin
       run: |
           docker run -d -p 9000:9000 --name minio \
                      -e "MINIO_ACCESS_KEY=minioadmin" \
@@ -27,6 +24,8 @@ jobs:
                      -v /tmp/data:/data \
                      -v /tmp/config:/root/.minio \
                      minio/minio server /data
+                     
+          AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
           aws --endpoint-url http://127.0.0.1:9000/ s3 mb s3://testbucket --debug
            
     - name: Run Go Test
