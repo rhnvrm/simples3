@@ -39,10 +39,11 @@ func TestS3_FileUpload(t *testing.T) {
 		u UploadInput
 	}
 	tests := []struct {
-		name    string
-		fields  tConfig
-		args    args
-		wantErr bool
+		name        string
+		fields      tConfig
+		args        args
+		testDetails bool
+		wantErr     bool
 	}{
 		{
 			name: "Upload test.txt",
@@ -62,6 +63,29 @@ func TestS3_FileUpload(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "Upload test.txt with custom metadata",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				UploadInput{
+					Bucket:      os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey:   "test_metadata.txt",
+					ContentType: "text/plain",
+					FileName:    "test.txt",
+					Body:        testTxt,
+					CustomMetadata: map[string]string{
+						"test-metadata": "foo-bar",
+					},
+				},
+			},
+			wantErr:     false,
+			testDetails: true,
 		},
 		{
 			name: "Upload avatar.png",
@@ -111,9 +135,28 @@ func TestS3_FileUpload(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
 			}
+
+			// reset file, to reuse in further tests.
+			tt.args.u.Body.Seek(0, 0)
+
 			// check for empty response
 			if (resp == UploadResponse{}) {
 				t.Errorf("S3.FileUpload() returned empty response, %v", resp)
+			}
+
+			if tt.testDetails {
+				dResp, err := s3.FileDetails(DetailsInput{
+					Bucket:    tt.args.u.Bucket,
+					ObjectKey: tt.args.u.ObjectKey,
+				})
+
+				if (err != nil) != tt.wantErr {
+					t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
+				}
+
+				if len(dResp.AmzMeta) != 1 {
+					t.Errorf("S3.FileDetails() returned incorrect metadata, got: %v", dResp.AmzMeta)
+				}
 			}
 		})
 	}

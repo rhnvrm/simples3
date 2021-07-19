@@ -42,10 +42,31 @@ type S3 struct {
 	URIFormat string
 }
 
-// DownloadInput is passed to FileUpload as a parameter.
+// DownloadInput is passed to FileDownload as a parameter.
 type DownloadInput struct {
 	Bucket    string
 	ObjectKey string
+}
+
+// DetailsInput is passed to FileDetails as a parameter.
+type DetailsInput struct {
+	Bucket    string
+	ObjectKey string
+}
+
+// DetailsResponse is returned by FileDetails.
+type DetailsResponse struct {
+	ContentType   string
+	ContentLength string
+	AcceptRanges  string
+	Date          string
+	Etag          string
+	LastModified  string
+	Server        string
+	AmzID2        string
+	AmzRequestID  string
+	AmzMeta       map[string]string
+	ExtraHeaders  map[string]string
 }
 
 // UploadInput is passed to FileUpload as a parameter.
@@ -420,6 +441,78 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	}
 
 	return nil
+}
+
+func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
+	req, err := http.NewRequest(
+		http.MethodHead, s3.getURL(u.Bucket, u.ObjectKey), nil,
+	)
+	if err != nil {
+		return DetailsResponse{}, err
+	}
+
+	if err := s3.signRequest(req); err != nil {
+		return DetailsResponse{}, err
+	}
+
+	res, err := s3.getClient().Do(req)
+	if err != nil {
+		return DetailsResponse{}, err
+	}
+
+	if res.StatusCode != 200 {
+		return DetailsResponse{}, fmt.Errorf("status code: %s", res.Status)
+	}
+
+	var out DetailsResponse
+	for k, v := range res.Header {
+		lk := strings.ToLower(k)
+
+		switch lk {
+		case "content-type":
+			out.ContentType = getFirstString(v)
+		case "content-length":
+			out.ContentLength = getFirstString(v)
+		case "accept-ranges":
+			out.AcceptRanges = getFirstString(v)
+		case "date":
+			out.Date = getFirstString(v)
+		case "etag":
+			out.Etag = getFirstString(v)
+		case "last-modified":
+			out.LastModified = getFirstString(v)
+		case "server":
+			out.Server = getFirstString(v)
+		case "x-amz-id-2":
+			out.AmzID2 = getFirstString(v)
+		case "x-amz-request-id":
+			out.AmzRequestID = getFirstString(v)
+		default:
+			if strings.HasPrefix(lk, AMZMetaPrefix) {
+				if out.AmzMeta == nil {
+					out.AmzMeta = map[string]string{}
+				}
+
+				out.AmzMeta[k] = getFirstString(v)
+			} else {
+				if out.ExtraHeaders == nil {
+					out.ExtraHeaders = map[string]string{}
+				}
+
+				out.ExtraHeaders[k] = getFirstString(v)
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func getFirstString(s []string) string {
+	if len(s) > 0 {
+		return s[0]
+	}
+
+	return ""
 }
 
 // if object matches reserved string, no need to encode them
