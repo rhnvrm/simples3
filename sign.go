@@ -1,4 +1,4 @@
-// LICENSE MIT
+// LICENSE BSD-2-Clause-FreeBSD
 // Copyright (c) 2018, Rohan Verma <hello@rohanverma.net>
 // Copyright (C) 2012 Blake Mizerany
 // contains code from: github.com/bmizerany/aws4
