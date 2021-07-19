@@ -288,12 +288,14 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
-func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
+// Metadata will be added to the file content.
+func (s3 *S3) FileUpload(u UploadInput, metadata map[string]string) (UploadResponse, error) {
 	fSize, err := detectFileSize(u.Body)
 	if err != nil {
 		return UploadResponse{}, err
 	}
-	policies, err := s3.CreateUploadPolicies(UploadConfig{
+
+	uc := UploadConfig{
 		UploadURL:          s3.getURL(u.Bucket),
 		BucketName:         u.Bucket,
 		ObjectKey:          u.ObjectKey,
@@ -304,8 +306,18 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		MetaData: map[string]string{
 			"success_action_status": "201", // returns XML doc on success
 		},
-	})
+	}
 
+	// Set custom metadata.
+	for k, v := range metadata {
+		if !strings.HasPrefix(k, "x-amz-meta-") {
+			k = fmt.Sprintf("x-amz-meta-%s", k)
+		}
+
+		uc.MetaData[k] = v
+	}
+
+	policies, err := s3.CreateUploadPolicies(uc)
 	if err != nil {
 		return UploadResponse{}, err
 	}
