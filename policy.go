@@ -1,4 +1,4 @@
-// LICENSE MIT
+// LICENSE BSD-2-Clause-FreeBSD
 // Copyright (c) 2018, Rohan Verma <hello@rohanverma.net>
 // Copyright (c) 2017, L Campbell
 // forked from: https://github.com/lye/s3/

@@ -1,4 +1,4 @@
-// LICENSE MIT
+// LICENSE BSD-2-Clause-FreeBSD
 // Copyright (c) 2018, Rohan Verma <hello@rohanverma.net>
 
 package simples3
@@ -62,12 +62,12 @@ type UploadInput struct {
 // UploadResponse receives the following XML
 // in case of success, since we set a 201 response from S3.
 // Sample response:
-// <PostResponse>
-//     <Location>https://s3.amazonaws.com/link-to-the-file</Location>
-//     <Bucket>s3-bucket</Bucket>
-//     <Key>development/8614bd40-691b-4668-9241-3b342c6cf429/image.jpg</Key>
-//     <ETag>"32-bit-tag"</ETag>
-// </PostResponse>
+//     <PostResponse>
+//       <Location>https://s3.amazonaws.com/link-to-the-file</Location>
+//       <Bucket>s3-bucket</Bucket>
+//       <Key>development/8614bd40-691b-4668-9241-3b342c6cf429/image.jpg</Key>
+//       <ETag>"32-bit-tag"</ETag>
+//     </PostResponse>
 type UploadResponse struct {
 	Location string `xml:"Location"`
 	Bucket   string `xml:"Bucket"`
