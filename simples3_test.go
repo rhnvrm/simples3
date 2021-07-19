@@ -82,7 +82,7 @@ func TestS3_FileUpload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
 			s3.SetEndpoint(tt.fields.Endpoint)
-			resp, err := s3.FileUpload(tt.args.u, nil)
+			resp, err := s3.FileUpload(tt.args.u)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
 			}

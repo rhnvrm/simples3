@@ -52,6 +52,7 @@ type UploadInput struct {
 	// optional fields
 	ContentDisposition string
 	ACL                string
+	Metadata           map[string]string
 
 	Body io.ReadSeeker
 }
@@ -286,10 +287,12 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 	return res.Body, nil
 }
 
+const amzMeta = "x-amz-meta-"
+
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
 // Metadata will be added to the file content.
-func (s3 *S3) FileUpload(u UploadInput, metadata map[string]string) (UploadResponse, error) {
+func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	fSize, err := detectFileSize(u.Body)
 	if err != nil {
 		return UploadResponse{}, err
@@ -309,9 +312,9 @@ func (s3 *S3) FileUpload(u UploadInput, metadata map[string]string) (UploadRespo
 	}
 
 	// Set custom metadata.
-	for k, v := range metadata {
-		if !strings.HasPrefix(k, "x-amz-meta-") {
-			k = fmt.Sprintf("x-amz-meta-%s", k)
+	for k, v := range u.Metadata {
+		if !strings.HasPrefix(k, amzMeta) {
+			k = amzMeta + k
 		}
 
 		uc.MetaData[k] = v
