@@ -25,6 +25,10 @@ import (
 const (
 	securityCredentialsURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 )
+const (
+	// AMZMetaPrefix to prefix metadata key.
+	AMZMetaPrefix = "x-amz-meta-"
+)
 
 // S3 provides a wrapper around your S3 credentials.
 type S3 struct {
@@ -55,6 +59,7 @@ type UploadInput struct {
 	// optional fields
 	ContentDisposition string
 	ACL                string
+	CustomMetadata     map[string]string // Setting key/value pairs adds user-defined metadata keys to the object, prefixed with AMZMetaPrefix.
 
 	Body io.ReadSeeker
 }
@@ -307,7 +312,8 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	if err != nil {
 		return UploadResponse{}, err
 	}
-	policies, err := s3.CreateUploadPolicies(UploadConfig{
+
+	uc := UploadConfig{
 		UploadURL:          s3.getURL(u.Bucket),
 		BucketName:         u.Bucket,
 		ObjectKey:          u.ObjectKey,
@@ -318,8 +324,18 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		MetaData: map[string]string{
 			"success_action_status": "201", // returns XML doc on success
 		},
-	})
+	}
 
+	// Set custom metadata.
+	for k, v := range u.CustomMetadata {
+		if !strings.HasPrefix(k, AMZMetaPrefix) {
+			k = AMZMetaPrefix + k
+		}
+
+		uc.MetaData[k] = v
+	}
+
+	policies, err := s3.CreateUploadPolicies(uc)
 	if err != nil {
 		return UploadResponse{}, err
 	}
