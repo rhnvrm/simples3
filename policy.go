@@ -34,13 +34,13 @@ type UploadConfig struct {
 	MetaData   map[string]string
 }
 
-// UploadPolicies Amazon s3 upload policies
+// UploadPolicies Amazon s3 upload policies.
 type UploadPolicies struct {
 	URL  string
 	Form map[string]string
 }
 
-// PolicyJSON is policy rule
+// PolicyJSON is policy rule.
 type PolicyJSON struct {
 	Expiration string        `json:"expiration"`
 	Conditions []interface{} `json:"conditions"`
@@ -57,12 +57,12 @@ const (
 	defaultExpirationHour  = 1 * time.Hour
 )
 
-// nowTime mockable time.Now()
-var nowTime = func() time.Time {
+// nowTime is returns UTC time.
+func nowTime() time.Time {
 	return time.Now().UTC()
 }
 
-var newLine = []byte{'\n'}
+var newLine = []byte{'\n'} //nolint
 
 // CreateUploadPolicies creates amazon s3 sigv4 compatible
 // policy and signing keys with the signature returns the upload policy.
