@@ -17,7 +17,7 @@ type tConfig struct {
 	Region    string
 }
 
-func TestS3_FileUpload(t *testing.T) {
+func TestS3_FileUploadPostAndPut(t *testing.T) {
 	testTxt, err := os.Open("testdata/test.txt")
 	if err != nil {
 		return
@@ -128,9 +128,10 @@ func TestS3_FileUpload(t *testing.T) {
 	}
 	for _, testcase := range tests {
 		tt := testcase
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name+"_post", func(t *testing.T) {
 			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
 			s3.SetEndpoint(tt.fields.Endpoint)
+
 			resp, err := s3.FileUpload(tt.args.u)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
@@ -154,8 +155,40 @@ func TestS3_FileUpload(t *testing.T) {
 					t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
 				}
 
-				if len(dResp.AmzMeta) != 1 {
-					t.Errorf("S3.FileDetails() returned incorrect metadata, got: %v", dResp.AmzMeta)
+				if len(dResp.AmzMeta) != len(tt.args.u.CustomMetadata) {
+					t.Errorf("S3.FileDetails() returned incorrect metadata, got: %#v", dResp)
+				}
+			}
+		})
+		t.Run(tt.name+"_put", func(t *testing.T) {
+			s3 := New(tt.fields.Region, tt.fields.AccessKey, tt.fields.SecretKey)
+			s3.SetEndpoint(tt.fields.Endpoint)
+
+			resp, err := s3.FilePut(tt.args.u)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			// reset file, to reuse in further tests.
+			tt.args.u.Body.Seek(0, 0)
+
+			// check for empty response
+			if resp.ETag == "" {
+				t.Errorf("S3.FileUpload() returned empty response, %v", resp)
+			}
+
+			if tt.testDetails {
+				dResp, err := s3.FileDetails(DetailsInput{
+					Bucket:    tt.args.u.Bucket,
+					ObjectKey: tt.args.u.ObjectKey,
+				})
+
+				if (err != nil) != tt.wantErr {
+					t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
+				}
+
+				if len(dResp.AmzMeta) != len(tt.args.u.CustomMetadata) {
+					t.Errorf("S3.FileDetails() returned incorrect metadata, got: %#v", dResp)
 				}
 			}
 		})
@@ -292,6 +325,22 @@ func TestS3_FileDelete(t *testing.T) {
 				DeleteInput{
 					Bucket:    os.Getenv("AWS_S3_BUCKET"),
 					ObjectKey: "test.txt",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Delete test_metadata.txt",
+			fields: tConfig{
+				AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+				SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+				Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+				Region:    os.Getenv("AWS_S3_REGION"),
+			},
+			args: args{
+				DeleteInput{
+					Bucket:    os.Getenv("AWS_S3_BUCKET"),
+					ObjectKey: "test_metadata.txt",
 				},
 			},
 			wantErr: false,

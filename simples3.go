@@ -80,7 +80,9 @@ type UploadInput struct {
 	// optional fields
 	ContentDisposition string
 	ACL                string
-	CustomMetadata     map[string]string // Setting key/value pairs adds user-defined metadata keys to the object, prefixed with AMZMetaPrefix.
+	// Setting key/value pairs adds user-defined metadata
+	// keys to the object, prefixed with AMZMetaPrefix.
+	CustomMetadata map[string]string
 
 	Body io.ReadSeeker
 }
@@ -101,6 +103,14 @@ type UploadResponse struct {
 	ETag     string `xml:"ETag"`
 }
 
+// PutResponse is returned when the action is successful,
+// and the service sends back an HTTP 200 response. The response
+// returns ETag along with HTTP headers.
+type PutResponse struct {
+	ETag    string
+	Headers http.Header
+}
+
 // DeleteInput is passed to FileDelete as a parameter.
 type DeleteInput struct {
 	Bucket    string
@@ -108,7 +118,7 @@ type DeleteInput struct {
 }
 
 // IAMResponse is used by NewUsingIAM to auto
-// detect the credentials
+// detect the credentials.
 type IAMResponse struct {
 	Code            string `json:"Code"`
 	LastUpdated     string `json:"LastUpdated"`
@@ -143,7 +153,7 @@ func newUsingIAMImpl(baseURL, region string) (*S3, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(http.StatusText(resp.StatusCode))
 	}
 
@@ -157,7 +167,7 @@ func newUsingIAMImpl(baseURL, region string) (*S3, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(http.StatusText(resp.StatusCode))
 	}
 
@@ -241,7 +251,7 @@ func detectFileSize(body io.Seeker) (int64, error) {
 	}
 	defer body.Seek(pos, 0)
 
-	n, err := body.Seek(0, 2)
+	n, err := body.Seek(0, 2) //nolint:gomnd
 	if err != nil {
 		return -1, err
 	}
@@ -280,8 +290,11 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	// Signature Version 4 requests. It provides a hash of the
 	// request payload. If there is no payload, you must provide
 	// the hash of an empty string.
-	emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	req.Header.Set("x-amz-content-sha256", emptyhash)
+
+	if req.Header.Get("x-amz-content-sha256") == "" {
+		emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+		req.Header.Set("x-amz-content-sha256", emptyhash)
+	}
 
 	k := s3.signKeys(t)
 	h := hmac.New(sha256.New, k)
@@ -319,11 +332,85 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %s", res.Status)
 	}
 
 	return res.Body, nil
+}
+
+// FilePut makes a PUT call to S3.
+func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
+	fSize, err := detectFileSize(u.Body)
+	if err != nil {
+		return PutResponse{}, err
+	}
+
+	content := make([]byte, fSize)
+	_, err = u.Body.Read(content)
+	if err != nil {
+		return PutResponse{}, err
+	}
+	u.Body.Seek(0, 0)
+
+	req, er := http.NewRequest(http.MethodPut, s3.getURL(u.Bucket, u.ObjectKey), u.Body)
+	if er != nil {
+		return PutResponse{}, err
+	}
+
+	if u.ContentType == "" {
+		u.ContentType = "application/octet-stream"
+	}
+
+	h := sha256.New()
+	h.Write(content)
+	req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h.Sum(nil)))
+
+	req.Header.Set("Content-Type", u.ContentType)
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", fSize))
+	req.Header.Set("Host", req.URL.Host)
+
+	for k, v := range u.CustomMetadata {
+		req.Header.Set("x-amz-meta-"+k, v)
+	}
+
+	if u.ContentDisposition != "" {
+		req.Header.Set("Content-Disposition", u.ContentDisposition)
+	}
+
+	if u.ACL != "" {
+		req.Header.Set("x-amz-acl", u.ACL)
+	}
+
+	req.ContentLength = fSize
+
+	if err := s3.signRequest(req); err != nil {
+		return PutResponse{}, err
+	}
+
+	// debug(httputil.DumpRequest(req, true))
+	// Submit the request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return PutResponse{}, err
+	}
+	defer res.Body.Close()
+
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return PutResponse{}, err
+	}
+
+	// Check the response
+	if res.StatusCode != http.StatusOK {
+		return PutResponse{}, fmt.Errorf("status code: %s: %q", res.Status, data)
+	}
+
+	return PutResponse{
+		ETag:    res.Header.Get("ETag"),
+		Headers: res.Header.Clone(),
+	}, nil
 }
 
 // FileUpload makes a POST call with the file written as multipart
@@ -404,8 +491,9 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	if err != nil {
 		return UploadResponse{}, err
 	}
+
 	// Check the response
-	if res.StatusCode != 201 {
+	if res.StatusCode != http.StatusCreated {
 		return UploadResponse{}, fmt.Errorf("status code: %s: %q", res.Status, data)
 	}
 
@@ -436,7 +524,7 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	}
 
 	// Check the response
-	if res.StatusCode != 204 {
+	if res.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("status code: %s", res.Status)
 	}
 
@@ -460,7 +548,7 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 		return DetailsResponse{}, err
 	}
 
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		return DetailsResponse{}, fmt.Errorf("status code: %s", res.Status)
 	}
 
@@ -515,7 +603,7 @@ func getFirstString(s []string) string {
 	return ""
 }
 
-// if object matches reserved string, no need to encode them
+// if object matches reserved string, no need to encode them.
 var reservedObjectNames = regexp.MustCompile("^[a-zA-Z0-9-_.~/]+$")
 
 // encodePath encode the strings from UTF-8 byte representations to HTML hex escape sequences
@@ -525,7 +613,8 @@ var reservedObjectNames = regexp.MustCompile("^[a-zA-Z0-9-_.~/]+$")
 //
 // This function on the other hand is a direct replacement for url.Encode() technique to support
 // pretty much every UTF-8 character.
-// adapted from https://github.com/minio/minio-go/blob/fe1f3855b146c1b6ce4199740d317e44cf9e85c2/pkg/s3utils/utils.go#L285
+// adapted from
+// https://github.com/minio/minio-go/blob/fe1f3855b146c1b6ce4199740d317e44cf9e85c2/pkg/s3utils/utils.go#L285
 func encodePath(pathName string) string {
 	if reservedObjectNames.MatchString(pathName) {
 		return pathName
@@ -541,12 +630,12 @@ func encodePath(pathName string) string {
 			encodedPathname.WriteRune(s)
 			continue
 		default:
-			len := utf8.RuneLen(s)
-			if len < 0 {
+			lenR := utf8.RuneLen(s)
+			if lenR < 0 {
 				// if utf8 cannot convert, return the same string as is
 				return pathName
 			}
-			u := make([]byte, len)
+			u := make([]byte, lenR)
 			utf8.EncodeRune(u, s)
 			for _, r := range u {
 				hex := hex.EncodeToString([]byte{r})
