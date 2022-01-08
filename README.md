@@ -2,8 +2,8 @@
 
 ## Overview [![GoDoc](https://godoc.org/github.com/rhnvrm/simples3?status.svg)](https://godoc.org/github.com/rhnvrm/simples3) [![Go Report Card](https://goreportcard.com/badge/github.com/rhnvrm/simples3)](https://goreportcard.com/report/github.com/rhnvrm/simples3) [![GoCover](https://gocover.io/_badge/github.com/rhnvrm/simples3)](https://gocover.io/_badge/github.com/rhnvrm/simples3) [![Zerodha Tech](https://zerodha.tech/static/images/github-badge.svg)](https://zerodha.tech) 
 
-SimpleS3 is a golang library for uploading and deleting objects 
-on S3 buckets using REST API calls or Presigned URLs signed 
+SimpleS3 is a Go library for manipulating objects 
+in S3 buckets using REST API calls or Presigned URLs signed 
 using AWS Signature Version 4.
 
 ## Install
@@ -54,6 +54,7 @@ file, _ := s3.FileDownload(simples3.DownloadInput{
     Bucket:    AWSBucket,
     ObjectKey: "test.txt",
 })
+
 data, _ := ioutil.ReadAll(file)
 file.Close()
 

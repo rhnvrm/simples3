@@ -2,12 +2,15 @@ package simples3
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 type tConfig struct {
@@ -398,6 +401,12 @@ func TestS3_NewUsingIAM(t *testing.T) {
 				"SecretAccessKey" : "abc","Token" : "abc",
 				"Expiration" : "2018-12-24T16:24:59Z"}`
 	)
+
+	tsFail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+	}))
+	defer tsFail.Close()
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			t.Errorf("Expected 'GET' request, got '%s'", r.Method)
@@ -414,10 +423,23 @@ func TestS3_NewUsingIAM(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s3, err := newUsingIAMImpl(ts.URL, "abc")
-	if err != nil {
-		t.Errorf("S3.FileDelete() error = %v", err)
+	// Test for timeout.
+	_, err := newUsingIAM(&http.Client{Timeout: 1 * time.Second}, tsFail.URL, "abc")
+	if err == nil {
+		t.Errorf("Expected error, got nil")
+	} else {
+		var timeoutError net.Error
+		if errors.As(err, &timeoutError); !timeoutError.Timeout() {
+			t.Errorf("newUsingIAM() timeout check. got error = %v", err)
+		}
 	}
+
+	// Test for successful IAM fetch.
+	s3, err := newUsingIAM(http.DefaultClient, ts.URL, "abc")
+	if err != nil {
+		t.Errorf("newUsingIAM() error = %v", err)
+	}
+
 	if s3.AccessKey != "abc" && s3.SecretKey != "abc" && s3.Region != "abc" {
 		t.Errorf("S3.FileDelete() got = %v", s3)
 	}

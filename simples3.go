@@ -24,8 +24,7 @@ import (
 
 const (
 	securityCredentialsURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
-)
-const (
+
 	// AMZMetaPrefix to prefix metadata key.
 	AMZMetaPrefix = "x-amz-meta-"
 )
@@ -143,52 +142,77 @@ func New(region, accessKey, secretKey string) *S3 {
 // NewUsingIAM automatically generates an Instance of S3
 // using instance metatdata.
 func NewUsingIAM(region string) (*S3, error) {
-	return newUsingIAMImpl(securityCredentialsURL, region)
+	return newUsingIAM(
+		&http.Client{
+			// Set a timeout of 3 seconds for AWS IAM Calls.
+			Timeout: time.Second * 3, //nolint:gomnd
+		}, securityCredentialsURL, region)
 }
 
-func newUsingIAMImpl(baseURL, region string) (*S3, error) {
-	// Get the IAM role
-	resp, err := http.Get(baseURL)
+// fetchIAMData fetches the IAM data from the given URL.
+// In case of a normal AWS setup, baseURL would be securityCredentialsURL.
+// You can use this method, to manually fetch IAM data from a custom
+// endpoint and pass it to SetIAMData.
+func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
+	resp, err := cl.Get(baseURL)
 	if err != nil {
-		return nil, err
+		return IAMResponse{}, err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(http.StatusText(resp.StatusCode))
+		return IAMResponse{}, fmt.Errorf("Error fetching IAM data: %s", resp.Status)
 	}
 
 	role, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return IAMResponse{}, err
 	}
 
 	resp, err = http.Get(baseURL + "/" + string(role))
 	if err != nil {
-		return nil, err
+		return IAMResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(http.StatusText(resp.StatusCode))
+		return IAMResponse{}, errors.New(http.StatusText(resp.StatusCode))
 	}
 
-	var jsonResp IAMResponse
+	var jResp IAMResponse
 	jsonString, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return IAMResponse{}, err
 	}
 
-	if err := json.Unmarshal(jsonString, &jsonResp); err != nil {
-		return nil, err
+	if err := json.Unmarshal(jsonString, &jResp); err != nil {
+		return IAMResponse{}, err
+	}
+
+	return jResp, nil
+}
+
+func newUsingIAM(cl *http.Client, credUrl, region string) (*S3, error) {
+	// Get the IAM role
+	iamResp, err := fetchIAMData(cl, credUrl)
+	if err != nil {
+		return nil, fmt.Errorf("Error fetching IAM data: %w", err)
 	}
 
 	return &S3{
 		Region:    region,
-		AccessKey: jsonResp.AccessKeyID,
-		SecretKey: jsonResp.SecretAccessKey,
-		Token:     jsonResp.Token,
+		AccessKey: iamResp.AccessKeyID,
+		SecretKey: iamResp.SecretAccessKey,
+		Token:     iamResp.Token,
 
 		URIFormat: "https://s3.%s.amazonaws.com/%s",
 	}, nil
+}
+
+// setIAMData sets the IAM data on the S3 instance.
+func (s3 *S3) setIAMData(iamResp IAMResponse) {
+	s3.AccessKey = iamResp.AccessKeyID
+	s3.SecretKey = iamResp.SecretAccessKey
+	s3.Token = iamResp.Token
 }
 
 func (s3 *S3) getClient() *http.Client {
