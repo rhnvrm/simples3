@@ -309,6 +309,7 @@ func (s3 *S3) signRequest(req *http.Request) error {
 		}
 	}
 	req.Header.Set("Date", t.Format(amzDateISO8601TimeFormat))
+	req.Header.Set("X-Amz-Date", t.Format(amzDateISO8601TimeFormat))
 
 	// The x-amz-content-sha256 header is required for all AWS
 	// Signature Version 4 requests. It provides a hash of the
