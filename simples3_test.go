@@ -155,7 +155,7 @@ func TestS3_FileUploadPostAndPut(t *testing.T) {
 				})
 
 				if (err != nil) != tt.wantErr {
-					t.Errorf("S3.FileUpload() error = %v, wantErr %v", err, tt.wantErr)
+					t.Errorf("S3.FileDetails() error = %v, wantErr %v", err, tt.wantErr)
 				}
 
 				if len(dResp.AmzMeta) != len(tt.args.u.CustomMetadata) {
