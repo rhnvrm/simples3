@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 )
@@ -18,6 +20,166 @@ type tConfig struct {
 	SecretKey string
 	Endpoint  string
 	Region    string
+}
+
+func TestS3_ListObjectsV2(t *testing.T) {
+	config := tConfig{
+		AccessKey: os.Getenv("AWS_S3_ACCESS_KEY"),
+		SecretKey: os.Getenv("AWS_S3_SECRET_KEY"),
+		Endpoint:  os.Getenv("AWS_S3_ENDPOINT"),
+		Region:    os.Getenv("AWS_S3_REGION"),
+	}
+	data := []byte("**Test!**")
+
+	s3 := New(config.Region, config.AccessKey, config.SecretKey)
+	s3.SetEndpoint(config.Endpoint)
+
+	files := []string{
+		"a.txt",
+		"a-b-c.txt",
+		"x/y/z.txt",
+	}
+
+	// Create test files.
+	for _, f := range files {
+		if _, err := s3.FileUpload(UploadInput{
+			Bucket:      os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:   f,
+			ContentType: "text/plain",
+			FileName:    f,
+			Body:        bytes.NewReader(data),
+		}); err != nil {
+			t.Errorf("S3.FileUpload() error = %v", err)
+		}
+	}
+
+	// Test cases.
+	tests := []struct {
+		name               string
+		details            ListObjectsV2Details
+		wantContents       []string
+		wantCommonPrefixes []string
+	}{
+		{
+			name: "nodetails",
+			details: ListObjectsV2Details{
+				Bucket: os.Getenv("AWS_S3_BUCKET"),
+			},
+			wantContents: []string{
+				"a.txt",
+				"a-b-c.txt",
+				"x/y/z.txt",
+			},
+			wantCommonPrefixes: []string{},
+		},
+		{
+			name: "delimiter(/)",
+			details: ListObjectsV2Details{
+				Bucket:    os.Getenv("AWS_S3_BUCKET"),
+				Delimiter: "/",
+			},
+			wantContents: []string{
+				"a.txt",
+				"a-b-c.txt",
+			},
+			wantCommonPrefixes: []string{
+				"x/",
+			},
+		},
+		{
+			name: "delimiter(-)",
+			details: ListObjectsV2Details{
+				Bucket:    os.Getenv("AWS_S3_BUCKET"),
+				Delimiter: "-",
+			},
+			wantContents: []string{
+				"a.txt",
+				"x/y/z.txt",
+			},
+			wantCommonPrefixes: []string{
+				"a-",
+			},
+		},
+		{
+			name: "prefix(a)",
+			details: ListObjectsV2Details{
+				Bucket: os.Getenv("AWS_S3_BUCKET"),
+				Prefix: "a",
+			},
+			wantContents: []string{
+				"a.txt",
+				"a-b-c.txt",
+			},
+			wantCommonPrefixes: []string{},
+		},
+		{
+			name: "prefix(x/)+delimiter(/)",
+			details: ListObjectsV2Details{
+				Bucket:    os.Getenv("AWS_S3_BUCKET"),
+				Delimiter: "/",
+				Prefix:    "x/",
+			},
+			wantContents: []string{},
+			wantCommonPrefixes: []string{
+				"x/y/",
+			},
+		},
+		{
+			name: "prefix(x/y/)+delimiter(/)",
+			details: ListObjectsV2Details{
+				Bucket:    os.Getenv("AWS_S3_BUCKET"),
+				Delimiter: "/",
+				Prefix:    "x/y/",
+			},
+			wantContents: []string{
+				"x/y/z.txt",
+			},
+			wantCommonPrefixes: []string{},
+		},
+	}
+
+	// Run tests.
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res, err := s3.ListObjectsV2(test.details)
+			if err != nil {
+				t.Errorf("S3.ListObjectsV2() error = %v", err)
+			}
+
+			gotContents := []string{}
+			gotCommonPrefixes := []string{}
+
+			for _, c := range res.Contents {
+				gotContents = append(gotContents, c.Key)
+			}
+			for _, c := range res.CommonPrefixes {
+				gotCommonPrefixes = append(gotCommonPrefixes, c.Prefix)
+			}
+
+			// Order is not important.
+			sort.Strings(gotContents)
+			sort.Strings(gotCommonPrefixes)
+			sort.Strings(test.wantContents)
+			sort.Strings(test.wantCommonPrefixes)
+
+			if !reflect.DeepEqual(gotContents, test.wantContents) {
+				t.Fatalf("expected: %v, got: %v", test.wantContents, gotContents)
+			}
+			if !reflect.DeepEqual(gotCommonPrefixes, test.wantCommonPrefixes) {
+				t.Fatalf("expected: %v, got: %v", test.wantCommonPrefixes, gotCommonPrefixes)
+			}
+		})
+	}
+
+	// Cleanup.
+	for _, f := range files {
+		if err := s3.FileDelete(DeleteInput{
+			Bucket:    os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey: f,
+		}); err != nil {
+			t.Errorf("S3.FileDelete() error = %v", err)
+		}
+	}
 }
 
 func TestS3_FileUploadPostAndPut(t *testing.T) {
