@@ -420,7 +420,9 @@ func (s3 *S3) ListObjectsV2(u ListObjectsV2Details) (ListObjectsV2Response, erro
 	}
 
 	var lr ListObjectsV2Response
-	xml.Unmarshal(data, &lr)
+	if err := xml.Unmarshal(data, &lr); err != nil {
+		return ListObjectsV2Response{}, err
+	}
 
 	return lr, nil
 }
@@ -610,7 +612,10 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	}
 
 	var ur UploadResponse
-	xml.Unmarshal(data, &ur)
+	if err := xml.Unmarshal(data, &ur); err != nil {
+		return UploadResponse{}, err
+	}
+
 	return ur, nil
 }
 
