@@ -42,6 +42,7 @@ type S3 struct {
 	URIFormat string
 }
 
+// ListObjectsV2Details is passed to ListObjectsV2 as a parameter.
 type ListObjectsV2Details struct {
 	Bucket            string
 	Delimiter         string
@@ -53,7 +54,7 @@ type ListObjectsV2Details struct {
 	StartAfter        string
 }
 
-// ListObjectsV2Response is passed to ListObjectsV2 as a parameter.
+// ListObjectsV2Response is returned by ListObjectsV2.
 type ListObjectsV2Response struct {
 	Name        string `xml:"Name"`
 	Prefix      string `xml:"Prefix"`
@@ -374,6 +375,7 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	return nil
 }
 
+// ListObjectsV2 returns a listing of objects in a bucket.
 func (s3 *S3) ListObjectsV2(u ListObjectsV2Details) (ListObjectsV2Response, error) {
 	requestUrl := s3.getURL(u.Bucket) + "?list-type=2"
 
