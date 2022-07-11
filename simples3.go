@@ -311,6 +311,10 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	req.Header.Set("Date", t.Format(amzDateISO8601TimeFormat))
 	req.Header.Set("X-Amz-Date", t.Format(amzDateISO8601TimeFormat))
 
+	if s3.Token != "" {
+		req.Header.Set("X-Amz-Security-Token", s3.Token)
+	}
+
 	// The x-amz-content-sha256 header is required for all AWS
 	// Signature Version 4 requests. It provides a hash of the
 	// request payload. If there is no payload, you must provide
