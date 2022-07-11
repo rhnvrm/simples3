@@ -58,6 +58,15 @@ file, _ := s3.FileDownload(simples3.DownloadInput{
 data, _ := ioutil.ReadAll(file)
 file.Close()
 
+// And also list files.
+resp, _ := s3.ListObjectsV2(simples3.ListObjectsV2Details{
+    Bucket:    AWSBucket,
+    Delimiter: "/",
+})
+for _, c := range resp.Contents {
+    fmt.Printf("%s    %s\n", c.Key, c.LastModified)
+}
+
 // You can also use this library to generate
 // Presigned URLs that can for eg. be used to
 // GET/PUT files on S3 through the browser.
