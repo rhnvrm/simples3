@@ -23,6 +23,8 @@ import (
 )
 
 const (
+	imdsTokenURL           = "http://169.254.169.254/latest/api/token"
+	imdsTokenHeader        = "X-aws-ec2-metadata-token"
 	securityCredentialsURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 
 	// AMZMetaPrefix to prefix metadata key.
@@ -89,12 +91,13 @@ type UploadInput struct {
 // UploadResponse receives the following XML
 // in case of success, since we set a 201 response from S3.
 // Sample response:
-//     <PostResponse>
-//       <Location>https://s3.amazonaws.com/link-to-the-file</Location>
-//       <Bucket>s3-bucket</Bucket>
-//       <Key>development/8614bd40-691b-4668-9241-3b342c6cf429/image.jpg</Key>
-//       <ETag>"32-bit-tag"</ETag>
-//     </PostResponse>
+//
+//	<PostResponse>
+//	  <Location>https://s3.amazonaws.com/link-to-the-file</Location>
+//	  <Bucket>s3-bucket</Bucket>
+//	  <Key>development/8614bd40-691b-4668-9241-3b342c6cf429/image.jpg</Key>
+//	  <ETag>"32-bit-tag"</ETag>
+//	</PostResponse>
 type UploadResponse struct {
 	Location string `xml:"Location"`
 	Bucket   string `xml:"Bucket"`
@@ -149,12 +152,55 @@ func NewUsingIAM(region string) (*S3, error) {
 		}, securityCredentialsURL, region)
 }
 
+// fetchIMDSToken retrieves an IMDSv2 token from the
+// EC2 instance metadata service. It returns a token
+// only if IMDSv2 is enabled in the EC2 instance metadata
+// configuration, otherwise returns an error.
+func fetchIMDSToken(cl *http.Client) (string, error) {
+	req, err := http.NewRequest(http.MethodPut, imdsTokenURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+
+	resp, err := cl.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch IMDSv2 token: %s", resp.Status)
+	}
+
+	token, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(token), nil
+}
+
 // fetchIAMData fetches the IAM data from the given URL.
 // In case of a normal AWS setup, baseURL would be securityCredentialsURL.
 // You can use this method, to manually fetch IAM data from a custom
 // endpoint and pass it to SetIAMData.
 func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
-	resp, err := cl.Get(baseURL)
+	var token string
+	token, err := fetchIMDSToken(cl)
+	// useIMDSv2 if no errors were returned from
+	// the fetchIMDSToken method call.
+	useIMDSv2 := err == nil
+
+	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
+	if err != nil {
+		return IAMResponse{}, err
+	}
+	if useIMDSv2 {
+		req.Header.Set(imdsTokenHeader, token)
+	}
+
+	resp, err := cl.Do(req)
 	if err != nil {
 		return IAMResponse{}, err
 	}
@@ -169,7 +215,15 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 		return IAMResponse{}, err
 	}
 
-	resp, err = http.Get(baseURL + "/" + string(role))
+	req, err = http.NewRequest(http.MethodGet, baseURL+"/"+string(role), nil)
+	if err != nil {
+		return IAMResponse{}, err
+	}
+	if useIMDSv2 {
+		req.Header.Set(imdsTokenHeader, token)
+	}
+
+	resp, err = cl.Do(req)
 	if err != nil {
 		return IAMResponse{}, err
 	}
