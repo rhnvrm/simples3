@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,10 +22,12 @@ import (
 )
 
 const (
-	imdsTokenURL           = "http://169.254.169.254/latest/api/token"
 	imdsTokenHeader        = "X-aws-ec2-metadata-token"
 	imdsTokenTtlHeader     = "X-aws-ec2-metadata-token-ttl-seconds"
-	securityCredentialsURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+	metadataBaseURL        = "http://169.254.169.254/latest"
+	securityCredentialsURI = "/meta-data/iam/security-credentials/"
+	imdsTokenURI           = "/api/token"
+	defaultIMDSTokenTTL    = "60"
 
 	// AMZMetaPrefix to prefix metadata key.
 	AMZMetaPrefix = "x-amz-meta-"
@@ -150,19 +151,21 @@ func NewUsingIAM(region string) (*S3, error) {
 		&http.Client{
 			// Set a timeout of 3 seconds for AWS IAM Calls.
 			Timeout: time.Second * 3, //nolint:gomnd
-		}, securityCredentialsURL, region)
+		}, metadataBaseURL, region)
 }
 
 // fetchIMDSToken retrieves an IMDSv2 token from the
 // EC2 instance metadata service. It returns a token and boolean,
 // only if IMDSv2 is enabled in the EC2 instance metadata
 // configuration, otherwise returns an error.
-func fetchIMDSToken(cl *http.Client) (string, bool, error) {
-	req, err := http.NewRequest(http.MethodPut, imdsTokenURL, nil)
+func fetchIMDSToken(cl *http.Client, baseURL string) (string, bool, error) {
+	req, err := http.NewRequest(http.MethodPut, baseURL+imdsTokenURI, nil)
 	if err != nil {
 		return "", false, err
 	}
-	req.Header.Set(imdsTokenTtlHeader, "21600")
+
+	// Set the token TTL to 60 seconds.
+	req.Header.Set(imdsTokenTtlHeader, defaultIMDSTokenTTL)
 
 	resp, err := cl.Do(req)
 	if err != nil {
@@ -183,21 +186,22 @@ func fetchIMDSToken(cl *http.Client) (string, bool, error) {
 }
 
 // fetchIAMData fetches the IAM data from the given URL.
-// In case of a normal AWS setup, baseURL would be securityCredentialsURL.
+// In case of a normal AWS setup, baseURL would be metadataBaseURL.
 // You can use this method, to manually fetch IAM data from a custom
 // endpoint and pass it to SetIAMData.
 func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
-	var token string
-	var useIMDSv2 bool
-	token, useIMDSv2, err := fetchIMDSToken(cl)
+	token, useIMDSv2, err := fetchIMDSToken(cl, baseURL)
 	if err != nil {
-		return IAMResponse{}, fmt.Errorf("Error fetching IMDSv2 token: %w", err)
+		return IAMResponse{}, fmt.Errorf("error fetching IMDSv2 token: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
+	url := baseURL + securityCredentialsURI
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return IAMResponse{}, err
+		return IAMResponse{}, fmt.Errorf("error creating imdsv2 token request: %w", err)
 	}
+
 	if useIMDSv2 {
 		req.Header.Set(imdsTokenHeader, token)
 	}
@@ -209,7 +213,7 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return IAMResponse{}, fmt.Errorf("Error fetching IAM data: %s", resp.Status)
+		return IAMResponse{}, fmt.Errorf("error fetching IAM data: %s", resp.Status)
 	}
 
 	role, err := ioutil.ReadAll(resp.Body)
@@ -217,9 +221,9 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 		return IAMResponse{}, err
 	}
 
-	req, err = http.NewRequest(http.MethodGet, baseURL+"/"+string(role), nil)
+	req, err = http.NewRequest(http.MethodGet, url+string(role), nil)
 	if err != nil {
-		return IAMResponse{}, err
+		return IAMResponse{}, fmt.Errorf("error creating role request: %w", err)
 	}
 	if useIMDSv2 {
 		req.Header.Set(imdsTokenHeader, token)
@@ -227,31 +231,32 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 
 	resp, err = cl.Do(req)
 	if err != nil {
-		return IAMResponse{}, err
+		return IAMResponse{}, fmt.Errorf("error fetching role data: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
-		return IAMResponse{}, errors.New(http.StatusText(resp.StatusCode))
+		return IAMResponse{}, fmt.Errorf("error fetching role data, got non 200 code: %s", resp.Status)
 	}
 
 	var jResp IAMResponse
 	jsonString, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return IAMResponse{}, err
+		return IAMResponse{}, fmt.Errorf("error reading role data: %w", err)
 	}
 
 	if err := json.Unmarshal(jsonString, &jResp); err != nil {
-		return IAMResponse{}, err
+		return IAMResponse{}, fmt.Errorf("error unmarshalling role data: %w (%s)", err, jsonString)
 	}
 
 	return jResp, nil
 }
 
-func newUsingIAM(cl *http.Client, credUrl, region string) (*S3, error) {
+func newUsingIAM(cl *http.Client, baseURL, region string) (*S3, error) {
 	// Get the IAM role
-	iamResp, err := fetchIAMData(cl, credUrl)
+	iamResp, err := fetchIAMData(cl, baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("Error fetching IAM data: %w", err)
+		return nil, fmt.Errorf("error fetching IAM data: %w", err)
 	}
 
 	return &S3{
@@ -265,7 +270,7 @@ func newUsingIAM(cl *http.Client, credUrl, region string) (*S3, error) {
 }
 
 // setIAMData sets the IAM data on the S3 instance.
-func (s3 *S3) setIAMData(iamResp IAMResponse) {
+func (s3 *S3) SetIAMData(iamResp IAMResponse) {
 	s3.AccessKey = iamResp.AccessKeyID
 	s3.SecretKey = iamResp.SecretAccessKey
 	s3.Token = iamResp.Token
