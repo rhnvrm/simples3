@@ -25,6 +25,7 @@ import (
 const (
 	imdsTokenURL           = "http://169.254.169.254/latest/api/token"
 	imdsTokenHeader        = "X-aws-ec2-metadata-token"
+	imdsTokenTtlHeader     = "X-aws-ec2-metadata-token-ttl-seconds"
 	securityCredentialsURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 
 	// AMZMetaPrefix to prefix metadata key.
@@ -153,32 +154,32 @@ func NewUsingIAM(region string) (*S3, error) {
 }
 
 // fetchIMDSToken retrieves an IMDSv2 token from the
-// EC2 instance metadata service. It returns a token
+// EC2 instance metadata service. It returns a token and boolean,
 // only if IMDSv2 is enabled in the EC2 instance metadata
 // configuration, otherwise returns an error.
-func fetchIMDSToken(cl *http.Client) (string, error) {
+func fetchIMDSToken(cl *http.Client) (string, bool, error) {
 	req, err := http.NewRequest(http.MethodPut, imdsTokenURL, nil)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+	req.Header.Set(imdsTokenTtlHeader, "21600")
 
 	resp, err := cl.Do(req)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch IMDSv2 token: %s", resp.Status)
+		return "", false, fmt.Errorf("failed to request IMDSv2 token: %s", resp.Status)
 	}
 
 	token, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return string(token), nil
+	return string(token), true, nil
 }
 
 // fetchIAMData fetches the IAM data from the given URL.
@@ -187,10 +188,11 @@ func fetchIMDSToken(cl *http.Client) (string, error) {
 // endpoint and pass it to SetIAMData.
 func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	var token string
-	token, err := fetchIMDSToken(cl)
-	// useIMDSv2 if no errors were returned from
-	// the fetchIMDSToken method call.
-	useIMDSv2 := err == nil
+	var useIMDSv2 bool
+	token, useIMDSv2, err := fetchIMDSToken(cl)
+	if err != nil {
+		return IAMResponse{}, fmt.Errorf("Error fetching IMDSv2 token: %w", err)
+	}
 
 	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 	if err != nil {
