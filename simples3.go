@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -43,6 +44,42 @@ type S3 struct {
 	Token     string
 	Endpoint  string
 	URIFormat string
+}
+
+// ListObjectsV2Details is passed to ListObjectsV2 as a parameter.
+type ListObjectsV2Details struct {
+	Bucket            string
+	Delimiter         string
+	ContinuationToken string
+	EncodingType      string
+	FetchOwner        string
+	MaxKeys           string
+	Prefix            string
+	StartAfter        string
+}
+
+// ListObjectsV2Response is returned by ListObjectsV2.
+type ListObjectsV2Response struct {
+	Name        string `xml:"Name"`
+	Prefix      string `xml:"Prefix"`
+	KeyCount    string `xml:"KeyCount"`
+	MaxKeys     string `xml:"MaxKeys"`
+	Delimiter   string `xml:"Delimiter"`
+	IsTruncated string `xml:"IsTruncated"`
+	Contents    []struct {
+		Key          string `xml:"Key"`
+		LastModified string `xml:"LastModified"`
+		ETag         string `xml:"ETag"`
+		Size         uint   `xml:"Size"`
+		Owner        struct {
+			ID          string `xml:"ID"`
+			DisplayName string `xml:"DisplayName"`
+		} `xml:"Owner"`
+		StorageClass string `xml:"StorageClass"`
+	} `xml:"Contents"`
+	CommonPrefixes []struct {
+		Prefix string `xml:"Prefix"`
+	} `xml:"CommonPrefixes"`
 }
 
 // DownloadInput is passed to FileDownload as a parameter.
@@ -403,6 +440,58 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	return nil
 }
 
+// ListObjectsV2 returns a listing of objects in a bucket.
+func (s3 *S3) ListObjectsV2(u ListObjectsV2Details) (ListObjectsV2Response, error) {
+	requestUrl := s3.getURL(u.Bucket) + "?list-type=2"
+
+	for k, v := range map[string]string{
+		"delimiter":          u.Delimiter,
+		"continuation-token": u.ContinuationToken,
+		"encoding-type":      u.EncodingType,
+		"fetch-owner":        u.FetchOwner,
+		"max-keys":           u.MaxKeys,
+		"prefix":             u.Prefix,
+		"start-after":        u.StartAfter,
+	} {
+		if v != "" {
+			requestUrl += fmt.Sprintf("&%s=%s",
+				url.QueryEscape(k),
+				url.QueryEscape(v))
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, requestUrl, nil)
+	if err != nil {
+		return ListObjectsV2Response{}, err
+	}
+
+	if err := s3.signRequest(req); err != nil {
+		return ListObjectsV2Response{}, err
+	}
+
+	res, err := s3.getClient().Do(req)
+	if err != nil {
+		return ListObjectsV2Response{}, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return ListObjectsV2Response{}, fmt.Errorf("status code: %s", res.Status)
+	}
+
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return ListObjectsV2Response{}, err
+	}
+
+	var lr ListObjectsV2Response
+	if err := xml.Unmarshal(data, &lr); err != nil {
+		return ListObjectsV2Response{}, err
+	}
+
+	return lr, nil
+}
+
 // FileDownload makes a GET call and returns a io.ReadCloser.
 // After reading the response body, ensure closing the response.
 func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
@@ -588,7 +677,10 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	}
 
 	var ur UploadResponse
-	xml.Unmarshal(data, &ur)
+	if err := xml.Unmarshal(data, &ur); err != nil {
+		return UploadResponse{}, err
+	}
+
 	return ur, nil
 }
 
