@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,8 +25,6 @@ type PresignedInput struct {
 	Timestamp     time.Time
 	ExtraHeaders  map[string]string
 	ExpirySeconds int
-	Protocol      string
-	Endpoint      string
 }
 
 // GeneratePresignedURL creates a Presigned URL that can be used
@@ -35,8 +34,9 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	var (
 		nowTime = nowTime()
 
-		protocol = defaultProtocol
-		endpoint = defaultPresignedHost
+		protocol    = defaultProtocol
+		hostname    = defaultPresignedHost
+		path_prefix = ""
 	)
 	if !in.Timestamp.IsZero() {
 		nowTime = in.Timestamp.UTC()
@@ -52,11 +52,16 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	b.Reset()
 
 	// Set the protocol as default if not provided.
-	if in.Protocol != "" {
-		protocol = in.Protocol
-	}
-	if in.Endpoint != "" {
-		endpoint = in.Endpoint
+	if endpoint, _ := url.Parse(s3.Endpoint); endpoint.Host != "" {
+		protocol = endpoint.Scheme + "://"
+		hostname = endpoint.Host
+		path_prefix = path.Join("/", endpoint.Path, in.Bucket)
+	} else {
+		host := bytes.Buffer{}
+		host.WriteString(in.Bucket)
+		host.WriteRune('.')
+		host.WriteString(hostname)
+		hostname = host.String()
 	}
 
 	// Add host to Headers
@@ -64,16 +69,13 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	for k, v := range in.ExtraHeaders {
 		signedHeaders[k] = []byte(v)
 	}
-	host := bytes.Buffer{}
-	host.WriteString(in.Bucket)
-	host.WriteRune('.')
-	host.WriteString(endpoint)
-	signedHeaders["host"] = host.Bytes()
+	signedHeaders["host"] = []byte(hostname)
 
 	// Start Canonical Request Formation
 	h := sha256.New()          // We write the canonical request directly to the SHA256 hash.
 	h.Write([]byte(in.Method)) // HTTP Verb
 	h.Write(newLine)
+	h.Write([]byte(path_prefix))
 	h.Write([]byte{'/'})
 	h.Write([]byte(in.ObjectKey)) // CanonicalURL
 	h.Write(newLine)
@@ -193,10 +195,14 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	b.Reset()
 
 	// Start Generating URL
-	b.WriteString(protocol)
-	b.WriteString(in.Bucket)
-	b.WriteRune('.')
-	b.WriteString(endpoint)
+	if s3.Endpoint != "" {
+		b.WriteString(s3.Endpoint)
+		b.WriteRune('/')
+		b.WriteString(in.Bucket)
+	} else {
+		b.WriteString(protocol)
+		b.WriteString(hostname)
+	}
 	b.WriteRune('/')
 	b.WriteString(in.ObjectKey)
 	b.WriteRune('?')
