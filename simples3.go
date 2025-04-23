@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -43,6 +44,10 @@ type S3 struct {
 	Token     string
 	Endpoint  string
 	URIFormat string
+	initMode  string
+	expiry    time.Time
+
+	mu sync.Mutex
 }
 
 // DownloadInput is passed to FileDownload as a parameter.
@@ -124,13 +129,13 @@ type DeleteInput struct {
 // IAMResponse is used by NewUsingIAM to auto
 // detect the credentials.
 type IAMResponse struct {
-	Code            string `json:"Code"`
-	LastUpdated     string `json:"LastUpdated"`
-	Type            string `json:"Type"`
-	AccessKeyID     string `json:"AccessKeyId"`
-	SecretAccessKey string `json:"SecretAccessKey"`
-	Token           string `json:"Token"`
-	Expiration      string `json:"Expiration"`
+	Code            string    `json:"Code"`
+	LastUpdated     string    `json:"LastUpdated"`
+	Type            string    `json:"Type"`
+	AccessKeyID     string    `json:"AccessKeyId"`
+	SecretAccessKey string    `json:"SecretAccessKey"`
+	Token           string    `json:"Token"`
+	Expiration      time.Time `json:"Expiration"`
 }
 
 // New returns an instance of S3.
@@ -171,7 +176,11 @@ func fetchIMDSToken(cl *http.Client, baseURL string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		resp.Body.Close()
+		io.Copy(ioutil.Discard, resp.Body)
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("failed to request IMDSv2 token: %s", resp.Status)
@@ -210,7 +219,6 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	if err != nil {
 		return IAMResponse{}, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return IAMResponse{}, fmt.Errorf("error fetching IAM data: %s", resp.Status)
@@ -220,6 +228,9 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	if err != nil {
 		return IAMResponse{}, err
 	}
+
+	_, _ = io.Copy(ioutil.Discard, resp.Body)
+	_ = resp.Body.Close()
 
 	req, err = http.NewRequest(http.MethodGet, url+string(role), nil)
 	if err != nil {
@@ -233,7 +244,12 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	if err != nil {
 		return IAMResponse{}, fmt.Errorf("error fetching role data: %w", err)
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		// Drain and close the body to let the Transport reuse the connection
+		io.Copy(ioutil.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return IAMResponse{}, fmt.Errorf("error fetching role data, got non 200 code: %s", resp.Status)
@@ -266,6 +282,8 @@ func newUsingIAM(cl *http.Client, baseURL, region string) (*S3, error) {
 		Token:     iamResp.Token,
 
 		URIFormat: "https://s3.%s.amazonaws.com/%s",
+		initMode:  "iam",
+		expiry:    iamResp.Expiration,
 	}, nil
 }
 
@@ -403,6 +421,30 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	return nil
 }
 
+func (s3 *S3) renewIAMToken() error {
+	if s3.initMode != "iam" {
+		return nil
+	}
+
+	if time.Since(s3.expiry) > 0 {
+		return nil
+	}
+
+	s3.mu.Lock()
+	defer s3.mu.Unlock()
+	iamResp, err := fetchIAMData(s3.getClient(), metadataBaseURL)
+	if err != nil {
+		return fmt.Errorf("error fetching IAM data: %w", err)
+	}
+
+	s3.expiry = iamResp.Expiration
+	s3.Token = iamResp.Token
+	s3.AccessKey = iamResp.AccessKeyID
+	s3.SecretKey = iamResp.SecretAccessKey
+
+	return nil
+}
+
 // FileDownload makes a GET call and returns a io.ReadCloser.
 // After reading the response body, ensure closing the response.
 func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
@@ -413,6 +455,9 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 		return nil, err
 	}
 
+	if err := s3.renewIAMToken(); err != nil {
+		return nil, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return nil, err
 	}
@@ -474,6 +519,9 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 
 	req.ContentLength = fSize
 
+	if err := s3.renewIAMToken(); err != nil {
+		return PutResponse{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return PutResponse{}, err
 	}
@@ -485,7 +533,11 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 	if err != nil {
 		return PutResponse{}, err
 	}
-	defer res.Body.Close()
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(ioutil.Discard, res.Body)
+	}()
 
 	data, err := ioutil.ReadAll(res.Body)
 	if err != nil {
@@ -533,6 +585,10 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		uc.MetaData[k] = v
 	}
 
+	if err := s3.renewIAMToken(); err != nil {
+		return UploadResponse{}, err
+	}
+
 	policies, err := s3.CreateUploadPolicies(uc)
 	if err != nil {
 		return UploadResponse{}, err
@@ -551,6 +607,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	if err != nil {
 		return UploadResponse{}, err
 	}
+
 	if _, err = io.Copy(fw, u.Body); err != nil {
 		return UploadResponse{}, err
 	}
@@ -575,7 +632,11 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	if err != nil {
 		return UploadResponse{}, err
 	}
-	defer res.Body.Close()
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(ioutil.Discard, res.Body)
+	}()
 
 	data, err := ioutil.ReadAll(res.Body)
 	if err != nil {
@@ -588,7 +649,7 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	}
 
 	var ur UploadResponse
-	xml.Unmarshal(data, &ur)
+	_ = xml.Unmarshal(data, &ur)
 	return ur, nil
 }
 
@@ -602,6 +663,10 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 		return err
 	}
 
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
 	if err := s3.signRequest(req); err != nil {
 		return err
 	}
@@ -612,6 +677,11 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(ioutil.Discard, res.Body)
+	}()
 
 	// Check the response
 	if res.StatusCode != http.StatusNoContent {
@@ -629,6 +699,10 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 		return DetailsResponse{}, err
 	}
 
+	if err := s3.renewIAMToken(); err != nil {
+		return DetailsResponse{}, err
+	}
+
 	if err := s3.signRequest(req); err != nil {
 		return DetailsResponse{}, err
 	}
@@ -637,6 +711,11 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 	if err != nil {
 		return DetailsResponse{}, err
 	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(ioutil.Discard, res.Body)
+	}()
 
 	if res.StatusCode != http.StatusOK {
 		return DetailsResponse{}, fmt.Errorf("status code: %s", res.Status)
