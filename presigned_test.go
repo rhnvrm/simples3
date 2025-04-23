@@ -60,10 +60,10 @@ func TestS3_GeneratePresignedURL_Personal(t *testing.T) {
 			os.Getenv("AWS_S3_ACCESS_KEY"),
 			os.Getenv("AWS_S3_SECRET_KEY"),
 		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
-			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test1.txt",
 			Method:        "GET",
 			Timestamp:     nowTime(),
@@ -81,10 +81,10 @@ func TestS3_GeneratePresignedURL_ExtraHeader(t *testing.T) {
 			os.Getenv("AWS_S3_ACCESS_KEY"),
 			os.Getenv("AWS_S3_SECRET_KEY"),
 		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
-			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test2.txt",
 			Method:        "GET",
 			Timestamp:     nowTime(),
@@ -105,10 +105,10 @@ func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
 			os.Getenv("AWS_S3_ACCESS_KEY"),
 			os.Getenv("AWS_S3_SECRET_KEY"),
 		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
 		dontwant := ""
 		if got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
-			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test2.txt",
 			Method:        "PUT",
 			Timestamp:     nowTime(),
@@ -126,13 +126,13 @@ func BenchmarkS3_GeneratePresigned(b *testing.B) {
 		os.Getenv("AWS_S3_ACCESS_KEY"),
 		os.Getenv("AWS_S3_SECRET_KEY"),
 	)
+	s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
-			Endpoint:      os.Getenv("AWS_S3_ENDPOINT"),
 			ObjectKey:     "test.txt",
 			Method:        "GET",
 			Timestamp:     nowTime(),
