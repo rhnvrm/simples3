@@ -426,7 +426,7 @@ func (s3 *S3) renewIAMToken() error {
 		return nil
 	}
 
-	if time.Since(s3.expiry) > 0 {
+	if time.Since(s3.expiry) < 0 {
 		return nil
 	}
 
