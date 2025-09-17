@@ -31,6 +31,10 @@ type PresignedInput struct {
 // for Authentication using Query Parameters.
 // (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
 func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
+	if err := s3.renewIAMToken(); err != nil {
+		return ""
+	}
+
 	var (
 		nowTime = nowTime()
 
