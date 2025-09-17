@@ -3,12 +3,13 @@ package simples3
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,18 +24,18 @@ type tConfig struct {
 func TestS3_FileUploadPostAndPut(t *testing.T) {
 	testTxt, err := os.Open("testdata/test.txt")
 	if err != nil {
-		return
+		t.Fatalf("Failed to open test.txt: %v", err)
 	}
 	defer testTxt.Close()
 	// Note: cannot re-use the same file descriptor due to seeking!
 	testTxtSpecialChars, err := os.Open("testdata/test.txt")
 	if err != nil {
-		return
+		t.Fatalf("Failed to open test.txt for special chars: %v", err)
 	}
 	defer testTxtSpecialChars.Close()
 	testPng, err := os.Open("testdata/avatar.png")
 	if err != nil {
-		return
+		t.Fatalf("Failed to open avatar.png: %v", err)
 	}
 	defer testPng.Close()
 
@@ -204,7 +205,7 @@ func TestS3_FileDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer testTxt.Close()
-	testTxtData, err := ioutil.ReadAll(testTxt)
+	testTxtData, err := io.ReadAll(testTxt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestS3_FileDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer testPng.Close()
-	testPngData, err := ioutil.ReadAll(testPng)
+	testPngData, err := io.ReadAll(testPng)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +293,7 @@ func TestS3_FileDownload(t *testing.T) {
 				t.Fatalf("S3.FileDownload() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			got, err := ioutil.ReadAll(resp)
+			got, err := io.ReadAll(resp)
 			if err != nil {
 				t.Fatalf("error = %v", err)
 			}
@@ -566,5 +567,211 @@ func TestGetURL(t *testing.T) {
 				t.Errorf("S3.getURL() got = %v, want %v", url, tt.want)
 			}
 		})
+	}
+}
+
+func TestList(t *testing.T) {
+	// Setup test environment
+	s3 := New(
+		os.Getenv("AWS_S3_REGION"),
+		os.Getenv("AWS_S3_ACCESS_KEY"),
+		os.Getenv("AWS_S3_SECRET_KEY"),
+	)
+	s3.SetEndpoint(os.Getenv("AWS_S3_ENDPOINT"))
+
+	// Test cases
+	tests := []struct {
+		name     string
+		setup    func() // Setup function to prepare test data
+		input    ListInput
+		validate func(ListResponse, error)
+		cleanup  func() // Cleanup function
+	}{
+		{
+			name: "Empty Bucket",
+			input: ListInput{
+				Bucket: os.Getenv("AWS_S3_BUCKET"),
+			},
+			validate: func(result ListResponse, err error) {
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if len(result.Objects) != 0 {
+					t.Errorf("Expected empty bucket, got %d objects", len(result.Objects))
+				}
+			},
+		},
+		{
+			name: "Basic Listing",
+			setup: func() {
+				// Upload test files
+				uploadTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{"file1.txt", "file2.txt", "file3.txt"})
+			},
+			input: ListInput{
+				Bucket: os.Getenv("AWS_S3_BUCKET"),
+			},
+			validate: func(result ListResponse, err error) {
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if len(result.Objects) != 3 {
+					t.Errorf("Expected 3 objects, got %d", len(result.Objects))
+				}
+			},
+			cleanup: func() {
+				cleanupTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{"file1.txt", "file2.txt", "file3.txt"})
+			},
+		},
+		{
+			name: "Pagination Test",
+			setup: func() {
+				// Upload many files for pagination testing
+				var filenames []string
+				for i := 1; i <= 25; i++ {
+					filenames = append(filenames, fmt.Sprintf("file%03d.txt", i))
+				}
+				uploadTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), filenames)
+			},
+			input: ListInput{
+				Bucket:  os.Getenv("AWS_S3_BUCKET"),
+				MaxKeys: 10,
+			},
+			validate: func(result ListResponse, err error) {
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if len(result.Objects) != 10 {
+					t.Errorf("Expected 10 objects, got %d", len(result.Objects))
+				}
+				if !result.IsTruncated {
+					t.Errorf("Expected IsTruncated=true for pagination")
+				}
+				if result.NextContinuationToken == "" {
+					t.Errorf("Expected NextContinuationToken for pagination: %v", result.NextContinuationToken)
+				}
+			},
+			cleanup: func() {
+				var filenames []string
+				for i := 1; i <= 25; i++ {
+					filenames = append(filenames, fmt.Sprintf("file%03d.txt", i))
+				}
+				cleanupTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), filenames)
+			},
+		},
+		{
+			name: "Prefix Filtering",
+			setup: func() {
+				uploadTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{
+					"documents/file1.txt",
+					"documents/file2.txt",
+					"images/image1.jpg",
+					"images/image2.jpg",
+				})
+			},
+			input: ListInput{
+				Bucket: os.Getenv("AWS_S3_BUCKET"),
+				Prefix: "documents/",
+			},
+			validate: func(result ListResponse, err error) {
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if len(result.Objects) != 2 {
+					t.Errorf("Expected 2 objects with documents/ prefix, got %d", len(result.Objects))
+				}
+				for _, obj := range result.Objects {
+					if !strings.HasPrefix(obj.Key, "documents/") {
+						t.Errorf("Object %s doesn't have expected prefix", obj.Key)
+					}
+				}
+			},
+			cleanup: func() {
+				cleanupTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{
+					"documents/file1.txt",
+					"documents/file2.txt",
+					"images/image1.jpg",
+					"images/image2.jpg",
+				})
+			},
+		},
+		{
+			name: "Delimiter Grouping",
+			setup: func() {
+				uploadTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{
+					"documents/important/file1.txt",
+					"documents/backup/file2.txt",
+					"images/landscape/image1.jpg",
+					"images/portrait/image2.jpg",
+				})
+			},
+			input: ListInput{
+				Bucket:    os.Getenv("AWS_S3_BUCKET"),
+				Delimiter: "/",
+				Prefix:    "documents/",
+			},
+			validate: func(result ListResponse, err error) {
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				// Should return common prefixes instead of individual files
+				if len(result.CommonPrefixes) != 2 {
+					t.Errorf("Expected 2 common prefixes, got %d", len(result.CommonPrefixes))
+				}
+			},
+			cleanup: func() {
+				cleanupTestFiles(t, s3, os.Getenv("AWS_S3_BUCKET"), []string{
+					"documents/important/file1.txt",
+					"documents/backup/file2.txt",
+					"images/landscape/image1.jpg",
+					"images/portrait/image2.jpg",
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup()
+			}
+
+			result, err := s3.List(tt.input)
+
+			if tt.validate != nil {
+				tt.validate(result, err)
+			}
+
+			if tt.cleanup != nil {
+				tt.cleanup()
+			}
+		})
+	}
+}
+
+// Helper functions
+func uploadTestFiles(t *testing.T, s3 *S3, bucket string, filenames []string) {
+	for _, filename := range filenames {
+		content := strings.NewReader("test content for " + filename)
+		_, err := s3.FilePut(UploadInput{
+			Bucket:      bucket,
+			ObjectKey:   filename,
+			ContentType: "text/plain",
+			Body:        content,
+		})
+		if err != nil {
+			t.Fatalf("Failed to upload test file %s: %v", filename, err)
+		}
+	}
+}
+
+func cleanupTestFiles(t *testing.T, s3 *S3, bucket string, filenames []string) {
+	for _, filename := range filenames {
+		err := s3.FileDelete(DeleteInput{
+			Bucket:    bucket,
+			ObjectKey: filename,
+		})
+		if err != nil {
+			t.Logf("Failed to cleanup test file %s: %v", filename, err)
+		}
 	}
 }

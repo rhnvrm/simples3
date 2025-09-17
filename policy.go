@@ -152,7 +152,7 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 	})
 }
 
-func (s3 S3) buildCredential(nowTime time.Time) []byte {
+func (s3 *S3) buildCredential(nowTime time.Time) []byte {
 	var b bytes.Buffer
 	b.WriteString(s3.AccessKey)
 	b.WriteRune('/')
@@ -166,7 +166,7 @@ func (s3 S3) buildCredential(nowTime time.Time) []byte {
 	return b.Bytes()
 }
 
-func (s3 S3) buildCredentialWithoutKey(nowTime time.Time) []byte {
+func (s3 *S3) buildCredentialWithoutKey(nowTime time.Time) []byte {
 	var b bytes.Buffer
 	b.WriteString(nowTime.Format(shortTimeFormat))
 	b.WriteRune('/')
