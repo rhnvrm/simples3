@@ -12,6 +12,7 @@ using AWS Signature Version 4.
 - 🔐 **AWS Signature Version 4** signing
 - 🌐 **Custom endpoint support** (MinIO, DigitalOcean Spaces, etc.)
 - 📋 **Simple List API** with pagination, prefix filtering, and delimiter grouping
+- 🔄 **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
 - 🔗 **Presigned URL generation** for secure browser uploads/downloads
 - 🪪 **IAM credential support** for EC2 instances
 - ✅ **Comprehensive test coverage**
@@ -167,7 +168,28 @@ for _, prefix := range result.CommonPrefixes {
 }
 ```
 
-#### Handle Pagination
+#### Iterator-based Listing (Go 1.23+)
+```go
+// Use the new ListAll method for memory-efficient iteration
+s3 := simples3.New("us-east-1", "your-access-key", "your-secret-key")
+
+// Iterate over all objects with automatic pagination and error handling
+seq, finish := s3.ListAll(simples3.ListInput{
+    Bucket: "my-bucket",
+    Prefix: "documents/", // Optional filtering
+})
+
+for obj := range seq {
+    fmt.Printf("📄 %s (%d bytes)\n", obj.Key, obj.Size)
+}
+
+// Check for any errors that occurred during iteration
+if err := finish(); err != nil {
+    log.Fatalf("Error during iteration: %v", err)
+}
+```
+
+#### Handle Pagination (Legacy)
 ```go
 // Handle large result sets with pagination
 func listAllObjects(s3 *simples3.S3, bucket string) ([]simples3.Object, error) {

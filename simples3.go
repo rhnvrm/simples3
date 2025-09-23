@@ -12,6 +12,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"iter"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -923,12 +924,12 @@ func (s3 *S3) List(input ListInput) (ListResponse, error) {
 
 	// Parse XML response using internal struct
 	var xmlResult struct {
-		XMLName              xml.Name `xml:"ListBucketResult"`
-		Name                 string   `xml:"Name"`
-		IsTruncated          bool     `xml:"IsTruncated"`
+		XMLName               xml.Name `xml:"ListBucketResult"`
+		Name                  string   `xml:"Name"`
+		IsTruncated           bool     `xml:"IsTruncated"`
 		NextContinuationToken string   `xml:"NextContinuationToken"`
-		KeyCount             int64    `xml:"KeyCount"`
-		Contents             []struct {
+		KeyCount              int64    `xml:"KeyCount"`
+		Contents              []struct {
 			Key          string `xml:"Key"`
 			LastModified string `xml:"LastModified"`
 			ETag         string `xml:"ETag"`
@@ -949,7 +950,7 @@ func (s3 *S3) List(input ListInput) (ListResponse, error) {
 		Name:                  xmlResult.Name,
 		IsTruncated:           xmlResult.IsTruncated,
 		NextContinuationToken: xmlResult.NextContinuationToken,
-		KeyCount:             xmlResult.KeyCount,
+		KeyCount:              xmlResult.KeyCount,
 	}
 
 	// Convert objects
@@ -971,7 +972,45 @@ func (s3 *S3) List(input ListInput) (ListResponse, error) {
 	return response, nil
 }
 
+// ListAll returns an iterator that yields all objects in the bucket,
+// automatically handling pagination. It also returns a finish callback
+// that should be called after iteration to check for any errors.
+func (s3 *S3) ListAll(input ListInput) (iter.Seq[Object], func() error) {
+	var iterErr error
 
+	seq := func(yield func(Object) bool) {
+		currentInput := input
+
+		for {
+			response, err := s3.List(currentInput)
+			if err != nil {
+				iterErr = err
+				return
+			}
+
+			// Yield each object
+			for _, obj := range response.Objects {
+				if !yield(obj) {
+					return // Early termination requested
+				}
+			}
+
+			// Check if there are more results
+			if !response.IsTruncated || response.NextContinuationToken == "" {
+				return // No more results
+			}
+
+			// Prepare for next page
+			currentInput.ContinuationToken = response.NextContinuationToken
+		}
+	}
+
+	finish := func() error {
+		return iterErr
+	}
+
+	return seq, finish
+}
 
 func getFirstString(s []string) string {
 	if len(s) > 0 {
