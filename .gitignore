@@ -24,3 +24,6 @@ tsconfig.json
 jsconfig.json
 
 .env
+
+# direnv
+.direnv
