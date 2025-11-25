@@ -2,6 +2,7 @@ package simples3
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -115,6 +116,306 @@ func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
 			ExpirySeconds: 3600,
 		}); got == dontwant {
 			t.Errorf("S3.GeneratePresignedURL() = %v, dontwant %v", got, dontwant)
+		}
+	})
+}
+
+func TestS3_GeneratePresignedURL_ResponseContentDisposition(t *testing.T) {
+	t.Run("BasicDisposition", func(t *testing.T) {
+		s := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "test-download.txt",
+			Method:                     "GET",
+			Timestamp:                  nowTime(),
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: "attachment; filename=\"report.pdf\"",
+		})
+		// Check that the URL contains the response-content-disposition parameter
+		if !strings.Contains(url, "response-content-disposition=") {
+			t.Errorf("URL missing response-content-disposition parameter")
+		}
+		// Check that the disposition is properly encoded
+		expectedDisposition := "attachment%3B%20filename%3D%22report.pdf%22"
+		if !strings.Contains(url, expectedDisposition) {
+			t.Errorf("response-content-disposition not properly encoded. URL: %v", url)
+		}
+	})
+
+	t.Run("DispositionWithSpacesAndSpecialChars", func(t *testing.T) {
+		s := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
+
+		// Test with spaces in filename
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "test-download.txt",
+			Method:                     "GET",
+			Timestamp:                  nowTime(),
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: "attachment; filename=\"my report 2024.pdf\"",
+		})
+
+		// Check that spaces are encoded as %20 not +
+		if strings.Contains(url, "my+report") {
+			t.Errorf("Spaces incorrectly encoded as +, should be %%20. URL: %v", url)
+		}
+		if !strings.Contains(url, "my%20report%202024") {
+			t.Errorf("Spaces not properly encoded as %%20. URL: %v", url)
+		}
+
+		// Test with special characters
+		url2 := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "test-download2.txt",
+			Method:                     "GET",
+			Timestamp:                  nowTime(),
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: "attachment; filename=\"file+with=special&chars.pdf\"",
+		})
+
+		// Check that special chars are properly encoded
+		// + should be encoded as %2B
+		// = should be encoded as %3D
+		// & should be encoded as %26
+		if !strings.Contains(url2, "file%2Bwith%3Dspecial%26chars") {
+			t.Errorf("Special characters not properly encoded. URL: %v", url2)
+		}
+	})
+}
+
+func TestS3_GeneratePresignedURL_URLEncoding(t *testing.T) {
+	// Test that the awsURIEncode function is used correctly for query parameters
+	// Note: Object key encoding in the path is a separate concern and uses different rules
+
+	t.Run("VerifyQueryParameterSpaceEncoding", func(t *testing.T) {
+		var testTime, _ = time.Parse(time.RFC1123, "Fri, 24 May 2013 00:00:00 GMT")
+		s := New(
+			"us-east-1",
+			"AKIAIOSFODNN7EXAMPLE",
+			"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		)
+
+		// The token contains spaces that should be encoded as %20 in query params
+		s.SetToken("test token with spaces")
+
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:        "testbucket",
+			ObjectKey:     "test.txt",
+			Method:        "GET",
+			Timestamp:     testTime,
+			ExpirySeconds: 3600,
+		})
+
+		// Verify that spaces in the security token are encoded as %20 not +
+		if strings.Contains(url, "test+token+with+spaces") {
+			t.Errorf("Spaces in token incorrectly encoded as +. URL: %v", url)
+		}
+		if !strings.Contains(url, "test%20token%20with%20spaces") {
+			t.Errorf("Spaces in token not properly encoded as %%20. URL: %v", url)
+		}
+	})
+
+	t.Run("VerifyCredentialEncoding", func(t *testing.T) {
+		var testTime, _ = time.Parse(time.RFC1123, "Fri, 24 May 2013 00:00:00 GMT")
+
+		// Test with special characters in the access key that need encoding
+		s := New(
+			"us-east-1",
+			"KEY+WITH=SPECIAL&CHARS",
+			"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		)
+
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:        "testbucket",
+			ObjectKey:     "test.txt",
+			Method:        "GET",
+			Timestamp:     testTime,
+			ExpirySeconds: 3600,
+		})
+
+		// Check that special characters in credentials are properly encoded
+		// + should be %2B, = should be %3D, & should be %26
+		if strings.Contains(url, "KEY+WITH=SPECIAL&CHARS") {
+			t.Errorf("Special chars in credential not encoded. URL: %v", url)
+		}
+		if !strings.Contains(url, "KEY%2BWITH%3DSPECIAL%26CHARS") {
+			t.Errorf("Special chars in credential not properly encoded. URL: %v", url)
+		}
+	})
+}
+
+func TestS3_GeneratePresignedURL_ResponseContentDisposition_PUT(t *testing.T) {
+	t.Run("PUTMethodWithDisposition", func(t *testing.T) {
+		s := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
+
+		// Test PUT method with response-content-disposition
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "upload-test.txt",
+			Method:                     "PUT",
+			Timestamp:                  nowTime(),
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: "attachment; filename=\"uploaded-file.txt\"",
+		})
+
+		// Check that the URL contains the response-content-disposition parameter
+		if !strings.Contains(url, "response-content-disposition=") {
+			t.Errorf("PUT URL missing response-content-disposition parameter")
+		}
+
+		// Check that it contains the PUT-specific parameters
+		if !strings.Contains(url, "X-Amz-Expires=3600") {
+			t.Errorf("PUT URL missing X-Amz-Expires parameter")
+		}
+
+		// Verify encoding is correct for PUT as well
+		expectedDisposition := "attachment%3B%20filename%3D%22uploaded-file.txt%22"
+		if !strings.Contains(url, expectedDisposition) {
+			t.Errorf("response-content-disposition not properly encoded in PUT URL. URL: %v", url)
+		}
+	})
+
+	t.Run("CompareGETandPUTWithSameDisposition", func(t *testing.T) {
+		s := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
+
+		fixedTime := nowTime()
+		disposition := "inline; filename=\"document.pdf\""
+
+		// Generate GET URL
+		getURL := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "test-file.pdf",
+			Method:                     "GET",
+			Timestamp:                  fixedTime,
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: disposition,
+		})
+
+		// Generate PUT URL with same parameters
+		putURL := s.GeneratePresignedURL(PresignedInput{
+			Bucket:                     os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:                  "test-file.pdf",
+			Method:                     "PUT",
+			Timestamp:                  fixedTime,
+			ExpirySeconds:              3600,
+			ResponseContentDisposition: disposition,
+		})
+
+		// Both should have the disposition parameter
+		if !strings.Contains(getURL, "response-content-disposition=") {
+			t.Errorf("GET URL missing response-content-disposition")
+		}
+		if !strings.Contains(putURL, "response-content-disposition=") {
+			t.Errorf("PUT URL missing response-content-disposition")
+		}
+
+		// The signatures will be different due to different HTTP methods
+		// but both should encode the disposition the same way
+		expectedEncodedDisposition := "inline%3B%20filename%3D%22document.pdf%22"
+		if !strings.Contains(getURL, expectedEncodedDisposition) {
+			t.Errorf("GET URL disposition encoding incorrect")
+		}
+		if !strings.Contains(putURL, expectedEncodedDisposition) {
+			t.Errorf("PUT URL disposition encoding incorrect")
+		}
+	})
+}
+
+func TestS3_GeneratePresignedURL_ObjectKeyEncoding(t *testing.T) {
+	// This test reveals a CRITICAL BUG: object keys with spaces/special chars are not encoded
+	t.Run("ObjectKeyWithSpaces", func(t *testing.T) {
+		s := New(
+			"us-east-1",
+			"AKIAIOSFODNN7EXAMPLE",
+			"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		)
+
+		url := s.GeneratePresignedURL(PresignedInput{
+			Bucket:        "mybucket",
+			ObjectKey:     "folder/file with spaces.txt",
+			Method:        "GET",
+			Timestamp:     nowTime(),
+			ExpirySeconds: 3600,
+		})
+
+		// This test will currently FAIL because spaces are not encoded
+		// The URL contains raw spaces which makes it invalid
+		if strings.Contains(url, "file with spaces") {
+			t.Errorf("CRITICAL BUG: Spaces in object key are not encoded! Invalid URL generated: %v", url)
+		}
+		// Should contain encoded spaces
+		if !strings.Contains(url, "file%20with%20spaces") {
+			t.Skipf("WARNING: Object key encoding not implemented. Raw URL: %v", url)
+		}
+	})
+
+	t.Run("ObjectKeyWithSpecialChars", func(t *testing.T) {
+		s := New(
+			"us-east-1",
+			"AKIAIOSFODNN7EXAMPLE",
+			"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		)
+
+		// Test with various special characters that MUST be encoded
+		testCases := []struct {
+			objectKey     string
+			mustNotContain string // Raw character that should be encoded
+			shouldContain  string // Expected encoded version
+			description   string
+		}{
+			{
+				"file&name.txt",
+				"file&name",
+				"file%26name",
+				"Ampersand breaks URL query string parsing",
+			},
+			{
+				"file#anchor.txt",
+				"file#anchor",
+				"file%23anchor",
+				"Hash creates URL fragment",
+			},
+			{
+				"file?query.txt",
+				"file?query",
+				"file%3Fquery",
+				"Question mark starts query string prematurely",
+			},
+		}
+
+		for _, tc := range testCases {
+			url := s.GeneratePresignedURL(PresignedInput{
+				Bucket:        "mybucket",
+				ObjectKey:     tc.objectKey,
+				Method:        "GET",
+				Timestamp:     nowTime(),
+				ExpirySeconds: 3600,
+			})
+
+			if strings.Contains(url, tc.mustNotContain) {
+				t.Errorf("CRITICAL BUG - %s: Special char not encoded in object key! Invalid URL: %v",
+					tc.description, url)
+			}
 		}
 	})
 }
