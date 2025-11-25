@@ -194,9 +194,6 @@ func TestS3_GeneratePresignedURL_ResponseContentDisposition(t *testing.T) {
 }
 
 func TestS3_GeneratePresignedURL_URLEncoding(t *testing.T) {
-	// Test that the awsURIEncode function is used correctly for query parameters
-	// Note: Object key encoding in the path is a separate concern and uses different rules
-
 	t.Run("VerifyQueryParameterSpaceEncoding", func(t *testing.T) {
 		var testTime, _ = time.Parse(time.RFC1123, "Fri, 24 May 2013 00:00:00 GMT")
 		s := New(
@@ -342,7 +339,6 @@ func TestS3_GeneratePresignedURL_ResponseContentDisposition_PUT(t *testing.T) {
 }
 
 func TestS3_GeneratePresignedURL_ObjectKeyEncoding(t *testing.T) {
-	// This test reveals a CRITICAL BUG: object keys with spaces/special chars are not encoded
 	t.Run("ObjectKeyWithSpaces", func(t *testing.T) {
 		s := New(
 			"us-east-1",
