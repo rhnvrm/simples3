@@ -9,6 +9,7 @@ using AWS Signature Version 4.
 **Features:**
 - **Simple, intuitive API** following Go idioms
 - **Complete S3 operations** - Upload, Download, Delete, List, Details
+- **Bucket management** - Create, Delete, and List buckets
 - **AWS Signature Version 4** signing
 - **Custom endpoint support** (MinIO, DigitalOcean Spaces, etc.)
 - **Simple List API** with pagination, prefix filtering, and delimiter grouping
@@ -62,6 +63,52 @@ func main() {
 ```
 
 ## API Reference
+
+### Bucket Operations
+
+#### List All Buckets
+```go
+// List all buckets for the AWS account
+result, err := s3.ListBuckets(simples3.ListBucketsInput{})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Found %d buckets:\n", len(result.Buckets))
+for _, bucket := range result.Buckets {
+    fmt.Printf("- %s (created: %s)\n", bucket.Name, bucket.CreationDate)
+}
+
+// Owner information is also available
+fmt.Printf("Owner: %s (%s)\n", result.Owner.DisplayName, result.Owner.ID)
+```
+
+#### Create a Bucket
+```go
+// Create a new bucket
+output, err := s3.CreateBucket(simples3.CreateBucketInput{
+    Bucket: "my-new-bucket",
+    Region: "us-east-1", // Optional, defaults to client region
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Bucket created at: %s\n", output.Location)
+```
+
+#### Delete a Bucket
+```go
+// Delete an empty bucket
+err := s3.DeleteBucket(simples3.DeleteBucketInput{
+    Bucket: "my-old-bucket",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Note: The bucket must be empty before deletion
+```
 
 ### File Operations
 

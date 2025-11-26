@@ -18,29 +18,31 @@
 - Content-Disposition and ACL support
 - Zero dependencies (stdlib only)
 
-## v0.10.2 - Code Organization (Refactor)
+## v0.10.2 - Code Organization (Refactor) ✅ COMPLETED
 **Scope**: Internal restructuring, no API changes
 **Size**: Medium (refactor ~1064 LOC)
+**Released**: Nov 26, 2025 ([v0.10.2](https://github.com/rhnvrm/simples3/releases/tag/v0.10.2))
 
 Split simples3.go into logical modules:
-- [ ] `simples3.go` - Core (S3 struct, New(), config methods: SetEndpoint/SetToken/SetClient)
-- [ ] `iam.go` - IAM (fetchIMDSToken, fetchIAMData, NewUsingIAM, renewIAMToken, SetIAMData)
-- [ ] `object.go` - Object ops (FileUpload, FilePut, FileDownload, FileDelete, FileDetails)
-- [ ] `list.go` - List ops (List, ListAll)
-- [ ] `helpers.go` - Utils (encodePath, detectFileSize, getFirstString, getURL)
-- [ ] Ensure all tests pass after refactor
+- [x] `simples3.go` - Core (S3 struct, New(), config methods: SetEndpoint/SetToken/SetClient)
+- [x] `iam.go` - IAM (fetchIMDSToken, fetchIAMData, NewUsingIAM, renewIAMToken, SetIAMData)
+- [x] `object.go` - Object ops (FileUpload, FilePut, FileDownload, FileDelete, FileDetails)
+- [x] `list.go` - List ops (List, ListAll)
+- [x] `helpers.go` - Utils (encodePath, detectFileSize, getFirstString, getURL)
+- [x] Ensure all tests pass after refactor
 
 **Why**: 1064-line file hard to navigate. Clean foundation before adding features.
 
 ---
 
-## v0.11.0 - Bucket Operations
+## v0.11.0 - Bucket Operations ✅ COMPLETED
 **Scope**: Essential bucket management for CLI
 **Size**: Small (3 APIs, ~200 LOC)
+**Released**: Nov 26, 2025 ([v0.11.0](https://github.com/rhnvrm/simples3/releases/tag/v0.11.0))
 
-- [ ] ListBuckets
-- [ ] CreateBucket (with region support)
-- [ ] DeleteBucket
+- [x] ListBuckets
+- [x] CreateBucket (with region support)
+- [x] DeleteBucket
 
 **Why**: These 3 operations unblock CLI development. Minimal but complete.
 
