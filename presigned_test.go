@@ -374,10 +374,10 @@ func TestS3_GeneratePresignedURL_ObjectKeyEncoding(t *testing.T) {
 
 		// Test with various special characters that MUST be encoded
 		testCases := []struct {
-			objectKey     string
+			objectKey      string
 			mustNotContain string // Raw character that should be encoded
 			shouldContain  string // Expected encoded version
-			description   string
+			description    string
 		}{
 			{
 				"file&name.txt",

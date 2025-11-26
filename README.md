@@ -9,12 +9,13 @@ using AWS Signature Version 4.
 **Features:**
 - **Simple, intuitive API** following Go idioms
 - **Complete S3 operations** - Upload, Download, Delete, List, Details
+- **Multipart upload** - Large file support with parallel uploads, progress tracking, and resumability
 - **Bucket management** - Create, Delete, and List buckets
 - **AWS Signature Version 4** signing
 - **Custom endpoint support** (MinIO, DigitalOcean Spaces, etc.)
 - **Simple List API** with pagination, prefix filtering, and delimiter grouping
 - **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
-- **Presigned URL generation** for secure browser uploads/downloads
+- **Presigned URL generation** for secure browser uploads/downloads (including multipart)
 - **IAM credential support** for EC2 instances
 - **Comprehensive test coverage**
 - **Zero dependencies** - uses only Go standard library
@@ -337,6 +338,159 @@ func main() {
         fmt.Printf("- %s (%d bytes)\n", obj.Key, obj.Size)
     }
 }
+```
+
+### Multipart Upload
+
+For large files (>100MB), use multipart upload for better performance, resumability, and parallel uploads.
+
+#### High-Level API (Recommended)
+
+The easiest way to upload large files:
+
+```go
+file, err := os.Open("large-video.mp4")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+// FileUploadMultipart automatically handles chunking and parallel uploads
+output, err := s3.FileUploadMultipart(simples3.MultipartUploadInput{
+    Bucket:      "my-bucket",
+    ObjectKey:   "videos/large-video.mp4",
+    Body:        file,
+    ContentType: "video/mp4",
+    PartSize:    10 * 1024 * 1024, // 10MB parts (optional, default 5MB)
+    Concurrency: 5,                 // Upload 5 parts in parallel (optional, default 1)
+    OnProgress: func(info simples3.ProgressInfo) {
+        fmt.Printf("\rProgress: %.1f%% (%d/%d parts)",
+            float64(info.UploadedBytes)/float64(info.TotalBytes)*100,
+            info.CurrentPart, info.TotalParts)
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("\nUploaded: %s (ETag: %s)\n", output.Key, output.ETag)
+```
+
+#### Low-Level API (Advanced)
+
+For more control over the upload process:
+
+```go
+// 1. Initiate multipart upload
+initOutput, err := s3.InitiateMultipartUpload(simples3.InitiateMultipartUploadInput{
+    Bucket:      "my-bucket",
+    ObjectKey:   "large-file.bin",
+    ContentType: "application/octet-stream",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. Upload parts (can be done in parallel or resumed later)
+var completedParts []simples3.CompletedPart
+partSize := int64(10 * 1024 * 1024) // 10MB
+
+for partNum := 1; partNum <= totalParts; partNum++ {
+    // Read part data
+    partData := getPartData(partNum, partSize) // Your function to get part data
+
+    output, err := s3.UploadPart(simples3.UploadPartInput{
+        Bucket:     "my-bucket",
+        ObjectKey:  "large-file.bin",
+        UploadID:   initOutput.UploadID,
+        PartNumber: partNum,
+        Body:       bytes.NewReader(partData),
+        Size:       int64(len(partData)),
+    })
+    if err != nil {
+        // Abort on error
+        s3.AbortMultipartUpload(simples3.AbortMultipartUploadInput{
+            Bucket:    "my-bucket",
+            ObjectKey: "large-file.bin",
+            UploadID:  initOutput.UploadID,
+        })
+        log.Fatal(err)
+    }
+
+    completedParts = append(completedParts, simples3.CompletedPart{
+        PartNumber: output.PartNumber,
+        ETag:       output.ETag,
+    })
+}
+
+// 3. Complete the upload
+result, err := s3.CompleteMultipartUpload(simples3.CompleteMultipartUploadInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "large-file.bin",
+    UploadID:  initOutput.UploadID,
+    Parts:     completedParts,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Upload completed: %s\n", result.ETag)
+```
+
+#### List Uploaded Parts
+
+Query which parts have been uploaded (useful for resuming uploads):
+
+```go
+output, err := s3.ListParts(simples3.ListPartsInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "large-file.bin",
+    UploadID:  uploadID,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, part := range output.Parts {
+    fmt.Printf("Part %d: %d bytes (ETag: %s)\n",
+        part.PartNumber, part.Size, part.ETag)
+}
+```
+
+#### Abort Multipart Upload
+
+Cancel an in-progress upload and clean up parts:
+
+```go
+err := s3.AbortMultipartUpload(simples3.AbortMultipartUploadInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "large-file.bin",
+    UploadID:  uploadID,
+})
+```
+
+#### Browser-Based Multipart Upload
+
+Generate presigned URLs for each part to enable direct browser uploads:
+
+```go
+// Backend: Initiate and generate presigned URLs
+initOutput, _ := s3.InitiateMultipartUpload(simples3.InitiateMultipartUploadInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "client-upload.bin",
+})
+
+// Generate presigned URL for part 1
+presignedURL := s3.GeneratePresignedUploadPartURL(simples3.PresignedMultipartInput{
+    Bucket:        "my-bucket",
+    ObjectKey:     "client-upload.bin",
+    UploadID:      initOutput.UploadID,
+    PartNumber:    1,
+    ExpirySeconds: 3600,
+})
+
+// Frontend: Upload directly to S3 using the presigned URL (via PUT request)
+// Then send ETags back to backend for completion
 ```
 
 ### Presigned URLs

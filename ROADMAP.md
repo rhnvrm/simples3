@@ -55,17 +55,37 @@ Object Operations:
 
 ---
 
-## v0.12.0 - Multipart Upload
-**Scope**: Large file support
-**Size**: Large (5 APIs, ~400 LOC)
+## v0.12.0 - Multipart Upload ✅ COMPLETED
+**Scope**: Large file support with parallel uploads, progress tracking, and presigned URLs
+**Size**: Large (10 APIs/features, ~800 LOC)
+**Released**: Nov 27, 2025
 
-- [ ] InitiateMultipartUpload
-- [ ] UploadPart (with retry logic)
-- [ ] CompleteMultipartUpload
-- [ ] AbortMultipartUpload
-- [ ] ListParts
+Core APIs:
+- [x] InitiateMultipartUpload
+- [x] UploadPart
+- [x] CompleteMultipartUpload
+- [x] AbortMultipartUpload
+- [x] ListParts
 
-**Why**: Critical for large files. Enables resumable uploads.
+High-Level Features:
+- [x] FileUploadMultipart (automatic chunking)
+- [x] uploadPartWithRetry (exponential backoff retry logic)
+- [x] uploadPartsParallel (concurrent part uploads with worker pool)
+- [x] Progress callbacks (real-time upload progress)
+- [x] GeneratePresignedUploadPartURL (browser-based multipart uploads)
+
+Advanced Features Implemented:
+- [x] Automatic file chunking with configurable part sizes (5MB-5GB)
+- [x] Parallel upload worker pool (configurable concurrency)
+- [x] Retry logic with exponential backoff (3 retries default, configurable)
+- [x] Real-time progress tracking with upload speed calculation
+- [x] Automatic cleanup on errors (AbortMultipartUpload)
+- [x] Support for resumable uploads via ListParts
+- [x] Comprehensive input validation (part size, part numbers, etc.)
+- [x] Integration tests with MinIO (500+ LOC)
+- [x] File integrity verification across all upload modes
+
+**Why**: Critical for large files (>100MB). Enables resumable uploads, parallel transfers, and better performance.
 
 ---
 
