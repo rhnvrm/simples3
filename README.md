@@ -7,16 +7,16 @@ in S3 buckets using REST API calls or Presigned URLs signed
 using AWS Signature Version 4.
 
 **Features:**
-- 🚀 **Simple, intuitive API** following Go idioms
-- 🪣 **Complete S3 operations** - Upload, Download, Delete, List, Details
-- 🔐 **AWS Signature Version 4** signing
-- 🌐 **Custom endpoint support** (MinIO, DigitalOcean Spaces, etc.)
-- 📋 **Simple List API** with pagination, prefix filtering, and delimiter grouping
-- 🔄 **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
-- 🔗 **Presigned URL generation** for secure browser uploads/downloads
-- 🪪 **IAM credential support** for EC2 instances
-- ✅ **Comprehensive test coverage**
-- 🎯 **Zero dependencies** - uses only Go standard library
+- **Simple, intuitive API** following Go idioms
+- **Complete S3 operations** - Upload, Download, Delete, List, Details
+- **AWS Signature Version 4** signing
+- **Custom endpoint support** (MinIO, DigitalOcean Spaces, etc.)
+- **Simple List API** with pagination, prefix filtering, and delimiter grouping
+- **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
+- **Presigned URL generation** for secure browser uploads/downloads
+- **IAM credential support** for EC2 instances
+- **Comprehensive test coverage**
+- **Zero dependencies** - uses only Go standard library
 
 ## Install
 
@@ -39,11 +39,11 @@ func main() {
     // Initialize S3 client
     s3 := simples3.New("us-east-1", "your-access-key", "your-secret-key")
 
-    // Use MinIO or other S3-compatible services
-    s3.SetEndpoint("https://s3.amazonaws.com")
-
     // Upload a file
-    file, _ := os.Open("my-file.txt")
+    file, err := os.Open("my-file.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
     defer file.Close()
 
     resp, err := s3.FileUpload(simples3.UploadInput{
@@ -99,6 +99,9 @@ defer file.Close()
 
 // Read the content
 data, err := io.ReadAll(file)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 #### Delete Files
@@ -159,12 +162,12 @@ if err != nil {
 
 // Process objects
 for _, obj := range result.Objects {
-    fmt.Printf("📄 %s (%d bytes)\n", obj.Key, obj.Size)
+    fmt.Printf("%s (%d bytes)\n", obj.Key, obj.Size)
 }
 
 // Process "directories" (common prefixes)
 for _, prefix := range result.CommonPrefixes {
-    fmt.Printf("📁 %s/\n", prefix)
+    fmt.Printf("%s/\n", prefix)
 }
 ```
 
@@ -180,7 +183,7 @@ seq, finish := s3.ListAll(simples3.ListInput{
 })
 
 for obj := range seq {
-    fmt.Printf("📄 %s (%d bytes)\n", obj.Key, obj.Size)
+    fmt.Printf("%s (%d bytes)\n", obj.Key, obj.Size)
 }
 
 // Check for any errors that occurred during iteration
@@ -231,9 +234,9 @@ func main() {
         log.Fatal(err)
     }
 
-    fmt.Printf("Total objects: %d\\n", len(allObjects))
+    fmt.Printf("Total objects: %d\n", len(allObjects))
     for _, obj := range allObjects {
-        fmt.Printf("- %s (%d bytes)\\n", obj.Key, obj.Size)
+        fmt.Printf("- %s (%d bytes)\n", obj.Key, obj.Size)
     }
 }
 ```
@@ -344,13 +347,7 @@ export AWS_S3_BUCKET="testbucket"
 
 ## Contributing
 
-We welcome contributions! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `just test-local`
-5. Submit a pull request
+Contributions welcome! Check [ROADMAP.md](ROADMAP.md) for planned features. Please add tests and ensure `just test-local` passes before submitting PRs.
 
 ## Author
 
