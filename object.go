@@ -5,13 +5,17 @@ package simples3
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
 type DownloadInput struct {
@@ -406,4 +410,284 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 	}
 
 	return out, nil
+}
+
+// CopyObjectInput is passed to CopyObject as a parameter.
+type CopyObjectInput struct {
+	// Required: Source bucket name
+	SourceBucket string
+
+	// Required: Source object key
+	SourceKey string
+
+	// Required: Destination bucket name
+	DestBucket string
+
+	// Required: Destination object key
+	DestKey string
+
+	// Optional: COPY (default) or REPLACE
+	// COPY - copies metadata from source
+	// REPLACE - replaces metadata with values specified in this input
+	MetadataDirective string
+
+	// Optional: Content type (only used when MetadataDirective = REPLACE)
+	ContentType string
+
+	// Optional: Custom metadata (only used when MetadataDirective = REPLACE)
+	CustomMetadata map[string]string
+}
+
+// CopyObjectOutput is returned by CopyObject.
+type CopyObjectOutput struct {
+	ETag         string
+	LastModified time.Time
+}
+
+// copyObjectResult is the internal type for XML parsing.
+type copyObjectResult struct {
+	ETag         string    `xml:"ETag"`
+	LastModified time.Time `xml:"LastModified"`
+}
+
+// CopyObject copies an object from source to destination.
+// Can copy within the same bucket or across buckets.
+// This operation is server-side, avoiding download/upload cycle.
+func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
+	// Validate required fields
+	if input.SourceBucket == "" || input.SourceKey == "" {
+		return CopyObjectOutput{}, fmt.Errorf("source bucket and key are required")
+	}
+	if input.DestBucket == "" || input.DestKey == "" {
+		return CopyObjectOutput{}, fmt.Errorf("destination bucket and key are required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	// Build destination URL
+	url := s3.getURL(input.DestBucket, input.DestKey)
+
+	// Create PUT request
+	req, err := http.NewRequest(http.MethodPut, url, nil)
+	if err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	// Set x-amz-copy-source header (URL-encoded)
+	copySource := "/" + input.SourceBucket + "/" + encodePath(input.SourceKey)
+	req.Header.Set("x-amz-copy-source", copySource)
+
+	// Optional metadata directive
+	if input.MetadataDirective != "" {
+		req.Header.Set("x-amz-metadata-directive", input.MetadataDirective)
+	}
+
+	// If REPLACE, set content-type and custom metadata
+	if input.MetadataDirective == "REPLACE" {
+		if input.ContentType != "" {
+			req.Header.Set("Content-Type", input.ContentType)
+		}
+		for k, v := range input.CustomMetadata {
+			req.Header.Set("x-amz-meta-"+k, v)
+		}
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return CopyObjectOutput{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var result copyObjectResult
+	if err := xml.Unmarshal(body, &result); err != nil {
+		return CopyObjectOutput{}, err
+	}
+
+	return CopyObjectOutput{
+		ETag:         result.ETag,
+		LastModified: result.LastModified,
+	}, nil
+}
+
+// DeleteObjectsInput is passed to DeleteObjects as a parameter.
+type DeleteObjectsInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Required: List of object keys to delete (max 1000)
+	Objects []string
+
+	// Optional: Quiet mode - only return errors, not successes
+	Quiet bool
+}
+
+// DeleteObjectsOutput is returned by DeleteObjects.
+type DeleteObjectsOutput struct {
+	Deleted []DeletedObject
+	Errors  []DeleteError
+}
+
+// DeletedObject represents a successfully deleted object.
+type DeletedObject struct {
+	Key string `xml:"Key"`
+}
+
+// DeleteError represents a deletion error.
+type DeleteError struct {
+	Key     string `xml:"Key"`
+	Code    string `xml:"Code"`
+	Message string `xml:"Message"`
+}
+
+// deleteRequest is the internal type for XML marshaling of the request.
+type deleteRequest struct {
+	XMLName xml.Name       `xml:"Delete"`
+	XMLNS   string         `xml:"xmlns,attr"`
+	Quiet   bool           `xml:"Quiet"`
+	Objects []deleteObject `xml:"Object"`
+}
+
+// deleteObject represents an object to delete in the XML request.
+type deleteObject struct {
+	Key string `xml:"Key"`
+}
+
+// deleteResult is the internal type for XML parsing of the response.
+type deleteResult struct {
+	Deleted []DeletedObject `xml:"Deleted"`
+	Errors  []DeleteError   `xml:"Error"`
+}
+
+// DeleteObjects deletes multiple objects in a single request (max 1000).
+// This is more efficient than calling FileDelete multiple times.
+// Returns both successful deletions and errors.
+func (s3 *S3) DeleteObjects(input DeleteObjectsInput) (DeleteObjectsOutput, error) {
+	// Validate required fields
+	if input.Bucket == "" {
+		return DeleteObjectsOutput{}, fmt.Errorf("bucket name is required")
+	}
+	if len(input.Objects) == 0 {
+		return DeleteObjectsOutput{}, fmt.Errorf("at least one object key is required")
+	}
+	if len(input.Objects) > 1000 {
+		return DeleteObjectsOutput{}, fmt.Errorf("cannot delete more than 1000 objects per request")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Build XML request body
+	deleteReq := deleteRequest{
+		XMLNS:   "http://s3.amazonaws.com/doc/2006-03-01/",
+		Quiet:   input.Quiet,
+		Objects: make([]deleteObject, len(input.Objects)),
+	}
+	for i, key := range input.Objects {
+		deleteReq.Objects[i] = deleteObject{Key: key}
+	}
+
+	xmlBody, err := xml.Marshal(deleteReq)
+	if err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Calculate Content-MD5 (required by S3 for this operation)
+	md5Hash := md5.Sum(xmlBody)
+	contentMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
+
+	// Build URL with ?delete query parameter
+	baseURL := s3.getURL(input.Bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Add delete query parameter (no value, just "?delete")
+	parsedURL.RawQuery = "delete"
+
+	// Create POST request
+	req, err := http.NewRequest(http.MethodPost, parsedURL.String(), bytes.NewReader(xmlBody))
+	if err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Set ContentLength BEFORE other headers
+	req.ContentLength = int64(len(xmlBody))
+
+	// Calculate content SHA256 for x-amz-content-sha256 header
+	h := sha256.New()
+	h.Write(xmlBody)
+	req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h.Sum(nil)))
+
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("Content-MD5", contentMD5)
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(xmlBody)))
+	req.Header.Set("Host", req.URL.Host)
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return DeleteObjectsOutput{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var result deleteResult
+	if err := xml.Unmarshal(body, &result); err != nil {
+		return DeleteObjectsOutput{}, err
+	}
+
+	return DeleteObjectsOutput{
+		Deleted: result.Deleted,
+		Errors:  result.Errors,
+	}, nil
 }

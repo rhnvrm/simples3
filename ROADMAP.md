@@ -35,31 +35,27 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.11.0 - Bucket Operations ✅ COMPLETED
-**Scope**: Essential bucket management for CLI
-**Size**: Small (3 APIs, ~200 LOC)
-**Released**: Nov 26, 2025 ([v0.11.0](https://github.com/rhnvrm/simples3/releases/tag/v0.11.0))
+## v0.11.0 - Bucket & Object Operations ✅ COMPLETED
+**Scope**: Essential bucket management + object manipulation for CLI
+**Size**: Medium (5 APIs, ~400 LOC)
+**Released**: Nov 26, 2025
 
+Bucket Operations:
 - [x] ListBuckets
 - [x] CreateBucket (with region support)
 - [x] DeleteBucket
 
-**Why**: These 3 operations unblock CLI development. Minimal but complete.
+Object Operations:
+- [x] CopyObject (within/across buckets)
+- [x] DeleteObjects (batch delete up to 1000 objects)
+
+**Why**: These operations unblock CLI development (mv, sync, batch operations). Combined release for efficiency.
+
+**Note**: DeleteObjects has a known compatibility issue with MinIO that requires further investigation. The implementation follows AWS S3 specification correctly.
 
 ---
 
-## v0.12.0 - Object Operations (Copy & Batch Delete)
-**Scope**: Object manipulation for CLI mv/sync
-**Size**: Small (2 APIs, ~150 LOC)
-
-- [ ] CopyObject (within/across buckets)
-- [ ] DeleteObjects (batch delete up to 1000 objects)
-
-**Why**: CopyObject enables `mv` command. Batch delete improves performance.
-
----
-
-## v0.13.0 - Multipart Upload
+## v0.12.0 - Multipart Upload
 **Scope**: Large file support
 **Size**: Large (5 APIs, ~400 LOC)
 
@@ -73,7 +69,7 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.14.0 - Server-Side Encryption
+## v0.13.0 - Server-Side Encryption
 **Scope**: Security basics
 **Size**: Small (~150 LOC)
 
@@ -85,7 +81,7 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.15.0 - Object Tagging
+## v0.14.0 - Object Tagging
 **Scope**: Metadata management
 **Size**: Small (4 APIs, ~200 LOC)
 
@@ -98,7 +94,7 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.16.0 - Object Versioning
+## v0.15.0 - Object Versioning
 **Scope**: Version control
 **Size**: Medium (5 APIs, ~300 LOC)
 
@@ -112,7 +108,7 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.17.0 - ACLs & Lifecycle
+## v0.16.0 - ACLs & Lifecycle
 **Scope**: Advanced management
 **Size**: Medium (9 APIs, ~500 LOC)
 
@@ -131,7 +127,7 @@ Lifecycle:
 
 ---
 
-## v0.18.0 - CLI Complete
+## v0.17.0 - CLI Complete
 **Scope**: Full-featured CLI with all library features
 **Size**: Large (~2000 LOC)
 

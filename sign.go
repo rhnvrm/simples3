@@ -81,7 +81,7 @@ func writeQuery(w io.Writer, r *http.Request) {
 		k = url.QueryEscape(k)
 		for _, v := range vs {
 			if v == "" {
-				a = append(a, k)
+				a = append(a, k+"=")
 			} else {
 				v = url.QueryEscape(v)
 				a = append(a, k+"="+v)

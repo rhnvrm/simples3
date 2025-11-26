@@ -159,6 +159,57 @@ err := s3.FileDelete(simples3.DeleteInput{
 })
 ```
 
+#### Copy Objects
+```go
+// Copy object within same bucket
+output, err := s3.CopyObject(simples3.CopyObjectInput{
+    SourceBucket: "my-bucket",
+    SourceKey:    "original/file.txt",
+    DestBucket:   "my-bucket",
+    DestKey:      "copied/file.txt",
+})
+
+// Copy across buckets
+output, err := s3.CopyObject(simples3.CopyObjectInput{
+    SourceBucket: "source-bucket",
+    SourceKey:    "file.txt",
+    DestBucket:   "dest-bucket",
+    DestKey:      "file.txt",
+})
+
+// Copy with metadata replacement
+output, err := s3.CopyObject(simples3.CopyObjectInput{
+    SourceBucket:      "my-bucket",
+    SourceKey:         "file.txt",
+    DestBucket:        "my-bucket",
+    DestKey:           "file-copy.txt",
+    MetadataDirective: "REPLACE",
+    ContentType:       "application/json",
+    CustomMetadata:    map[string]string{"version": "2"},
+})
+```
+
+#### Batch Delete Files
+```go
+// Delete multiple objects in one request (up to 1000)
+output, err := s3.DeleteObjects(simples3.DeleteObjectsInput{
+    Bucket:  "my-bucket",
+    Objects: []string{"file1.txt", "file2.txt", "file3.txt"},
+    Quiet:   false,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Check results
+for _, deleted := range output.Deleted {
+    fmt.Printf("Deleted: %s\n", deleted.Key)
+}
+for _, errItem := range output.Errors {
+    fmt.Printf("Failed to delete %s: %s\n", errItem.Key, errItem.Message)
+}
+```
+
 #### Get File Details
 ```go
 details, err := s3.FileDetails(simples3.DetailsInput{
