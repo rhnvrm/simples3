@@ -15,16 +15,25 @@ import (
 const (
 	defaultPresignedHost = "s3.amazonaws.com" // <bucket>
 	defaultProtocol      = "https://"         // <bucket>
+
+	HdrXAmzSignedHeaders = "X-Amz-SignedHeaders"
 )
 
 // PresignedInput is passed to GeneratePresignedURL as a parameter.
 type PresignedInput struct {
-	Bucket        string
-	ObjectKey     string
-	Method        string
-	Timestamp     time.Time
-	ExtraHeaders  map[string]string
-	ExpirySeconds int
+	Bucket                     string
+	ObjectKey                  string
+	Method                     string
+	Timestamp                  time.Time
+	ExtraHeaders               map[string]string
+	ExpirySeconds              int
+	ResponseContentDisposition string
+}
+
+// awsURIEncode encodes a string per AWS S3 requirements (space as %20, not +, as Go's url.QueryEscape does)
+// (https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
+func awsURIEncode(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 // GeneratePresignedURL creates a Presigned URL that can be used
@@ -75,22 +84,47 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	}
 	signedHeaders["host"] = []byte(hostname)
 
+	// Build signed headers string
+	sortedSH := make([]string, 0, len(signedHeaders))
+	for name := range signedHeaders {
+		sortedSH = append(sortedSH, name)
+	}
+	sort.Strings(sortedSH)
+	signedHeadersStr := strings.Join(sortedSH, ";")
+
+	// For URL: header names must be individually escaped, semicolons remain raw
+	// AWS format: "host;x-amz-date" not "host%3Bx-amz-date"
+	var signedHeadersForURL strings.Builder
+	for i, name := range sortedSH {
+		if i > 0 {
+			signedHeadersForURL.WriteRune(';')
+		}
+		signedHeadersForURL.WriteString(url.QueryEscape(name))
+	}
+
 	// Start Canonical Request Formation
 	h := sha256.New()          // We write the canonical request directly to the SHA256 hash.
 	h.Write([]byte(in.Method)) // HTTP Verb
 	h.Write(newLine)
 	h.Write([]byte(path_prefix))
 	h.Write([]byte{'/'})
-	h.Write([]byte(in.ObjectKey)) // CanonicalURL
+	h.Write([]byte(encodePath(in.ObjectKey))) // CanonicalURL
 	h.Write(newLine)
 
 	// Start QueryString Params (before SignedHeaders)
 	queryString := map[string]string{
-		"X-Amz-Algorithm":  algorithm,
-		"X-Amz-Credential": string(cred),
-		"X-Amz-Date":       amzdate,
-		"X-Amz-Expires":    strconv.Itoa(in.ExpirySeconds),
+		"X-Amz-Algorithm":    algorithm,
+		"X-Amz-Credential":   string(cred),
+		"X-Amz-Date":         amzdate,
+		"X-Amz-Expires":      strconv.Itoa(in.ExpirySeconds),
+		HdrXAmzSignedHeaders: signedHeadersForURL.String(),
 	}
+
+	// Include response-content-disposition if set
+	if in.ResponseContentDisposition != "" {
+		queryString["response-content-disposition"] = in.ResponseContentDisposition
+	}
+
 	//  include the x-amz-security-token incase we are using IAM role or AWS STS
 	if s3.Token != "" {
 		queryString["X-Amz-Security-Token"] = s3.Token
@@ -102,33 +136,20 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	for name := range queryString {
 		sortedQS = append(sortedQS, name)
 	}
-	sort.Strings(sortedQS) //sort by key
-
-	sortedSH := make([]string, 0, len(signedHeaders))
-	for name := range signedHeaders {
-		sortedSH = append(sortedSH, name)
-	}
-	sort.Strings(sortedSH) //sort by key
+	sort.Strings(sortedQS)
 
 	// Proceed to write canonical query params
-	for _, k := range sortedQS {
-		// HTTP Verb
-		h.Write([]byte(url.QueryEscape(k)))
+	for i, k := range sortedQS {
+		h.Write([]byte(awsURIEncode(k)))
 		h.Write([]byte{'='})
-		h.Write([]byte(url.QueryEscape(string(queryString[k]))))
-		h.Write([]byte{'&'})
-	}
-
-	h.Write([]byte("X-Amz-SignedHeaders="))
-	// Add Signed Headers to Query String
-	first := true
-	for i := 0; i < len(sortedSH); i++ {
-		if first {
-			h.Write([]byte(url.QueryEscape(sortedSH[i])))
-			first = false
+		// X-Amz-SignedHeaders already has properly formatted semicolons, retain as is.
+		if k == HdrXAmzSignedHeaders {
+			h.Write([]byte(queryString[k]))
 		} else {
-			h.Write([]byte{';'})
-			h.Write([]byte(url.QueryEscape(sortedSH[i])))
+			h.Write([]byte(awsURIEncode(queryString[k])))
+		}
+		if i < len(sortedQS)-1 {
+			h.Write([]byte{'&'})
 		}
 	}
 	h.Write(newLine)
@@ -145,23 +166,13 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	// End Canonical Headers
 
 	// Start Signed Headers
-	first = true
-	for i := 0; i < len(sortedSH); i++ {
-		if first {
-			h.Write([]byte(url.QueryEscape(sortedSH[i])))
-			first = false
-		} else {
-			h.Write([]byte{';'})
-			h.Write([]byte(url.QueryEscape(sortedSH[i])))
-		}
-	}
+	h.Write([]byte(signedHeadersStr))
 	h.Write(newLine)
-	// End Canonical Headers
+	// End Signed Headers
 
 	// Mention Unsigned Payload
 	h.Write([]byte("UNSIGNED-PAYLOAD"))
 
-	// canonicalReq := h.Bytes()
 	// Start StringToSign
 	b.WriteString(algorithm)
 	b.WriteRune('\n')
@@ -208,27 +219,20 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 		b.WriteString(hostname)
 	}
 	b.WriteRune('/')
-	b.WriteString(in.ObjectKey)
+	b.WriteString(encodePath(in.ObjectKey))
 	b.WriteRune('?')
 
-	// We don't need to have a sorted order here,
-	// but just to preserve tests.
-	for i := 0; i < len(sortedQS); i++ {
-		b.WriteString(url.QueryEscape(sortedQS[i]))
+	for i, k := range sortedQS {
+		b.WriteString(awsURIEncode(k))
 		b.WriteRune('=')
-		b.WriteString(url.QueryEscape(string(queryString[sortedQS[i]])))
-		b.WriteRune('&')
-	}
-	b.WriteString("X-Amz-SignedHeaders")
-	b.WriteRune('=')
-	first = true
-	for i := 0; i < len(sortedSH); i++ {
-		if first {
-			b.WriteString(url.QueryEscape(sortedSH[i]))
-			first = false
+		// X-Amz-SignedHeaders already has properly formatted semicolons
+		if k == HdrXAmzSignedHeaders {
+			b.WriteString(queryString[k])
 		} else {
-			b.WriteRune(';')
-			b.WriteString(url.QueryEscape(sortedSH[i]))
+			b.WriteString(awsURIEncode(queryString[k]))
+		}
+		if i < len(sortedQS)-1 {
+			b.WriteRune('&')
 		}
 	}
 	b.WriteString("&X-Amz-Signature=")
