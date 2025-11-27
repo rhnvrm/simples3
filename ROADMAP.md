@@ -73,7 +73,7 @@ This release consolidates all previously planned feature sets (v0.11.0 - v0.16.0
 
 ---
 
-## v0.17.0 - CLI Complete
+## v0.12.0 - CLI Complete
 **Scope**: Full-featured CLI with all library features
 **Size**: Large (~2000 LOC)
 
