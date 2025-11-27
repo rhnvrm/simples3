@@ -131,15 +131,16 @@ Features Implemented:
 
 ---
 
-## v0.15.0 - Object Versioning
+## v0.15.0 - Object Versioning ✅ COMPLETED
 **Scope**: Version control
 **Size**: Medium (5 APIs, ~300 LOC)
+**Released**: Nov 27, 2025
 
-- [ ] PutBucketVersioning
-- [ ] GetBucketVersioning
-- [ ] ListObjectVersions
-- [ ] GetObjectVersion
-- [ ] DeleteObjectVersion (with version ID)
+- [x] PutBucketVersioning
+- [x] GetBucketVersioning
+- [x] ListObjectVersions
+- [x] GetObjectVersion (via FileDownload)
+- [x] DeleteObjectVersion (via FileDelete)
 
 **Why**: Important for data safety. More complex due to version handling.
 

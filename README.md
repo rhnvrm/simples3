@@ -16,6 +16,7 @@ using AWS Signature Version 4.
 - **Simple List API** with pagination, prefix filtering, and delimiter grouping
 - **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
 - **Presigned URL generation** for secure browser uploads/downloads (including multipart)
+- **Object Versioning** - Enable versioning, list versions, and access specific object versions
 - **IAM credential support** for EC2 instances
 - **Comprehensive test coverage**
 - **Zero dependencies** - uses only Go standard library
@@ -416,6 +417,73 @@ Note: Tag support during upload varies by operation:
 - **FilePut** (PUT): ✅ Full support
 - **FileUpload** (POST): ⚠️  AWS S3 supported, MinIO limited (does not support tags in POST policy)
 - **CopyObject**: ✅ Full support (handles MinIO/R2 signature quirks automatically)
+
+### Object Versioning
+
+Enable and manage object versions to protect against accidental deletion or overwrite.
+
+#### Enable Versioning
+
+```go
+err := s3.PutBucketVersioning(simples3.PutBucketVersioningInput{
+    Bucket: "my-bucket",
+    Status: "Enabled", // or "Suspended"
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Check status
+config, err := s3.GetBucketVersioning("my-bucket")
+fmt.Printf("Versioning status: %s\n", config.Status)
+```
+
+#### List Object Versions
+
+List all versions of objects in a bucket:
+
+```go
+result, err := s3.ListVersions(simples3.ListVersionsInput{
+    Bucket: "my-bucket",
+    Prefix: "important-file.txt",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, version := range result.Versions {
+    fmt.Printf("Key: %s, VersionId: %s, IsLatest: %v\n",
+        version.Key, version.VersionId, version.IsLatest)
+}
+```
+
+#### Download Specific Version
+
+Retrieve a specific version of an object:
+
+```go
+file, err := s3.FileDownload(simples3.DownloadInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "my-file.txt",
+    VersionId: "v1-version-id",
+})
+if err != nil {
+    log.Fatal(err)
+}
+// Use file (io.ReadCloser) normally
+```
+
+#### Delete Specific Version
+
+Delete a specific version of an object:
+
+```go
+err := s3.FileDelete(simples3.DeleteInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "my-file.txt",
+    VersionId: "v1-version-id",
+})
+```
 
 ### Multipart Upload
 

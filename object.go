@@ -21,12 +21,14 @@ import (
 type DownloadInput struct {
 	Bucket    string
 	ObjectKey string
+	VersionId string // Optional: Version ID of the object to download
 }
 
 // DetailsInput is passed to FileDetails as a parameter.
 type DetailsInput struct {
 	Bucket    string
 	ObjectKey string
+	VersionId string // Optional: Version ID of the object to retrieve details for
 }
 
 // DetailsResponse is returned by FileDetails.
@@ -93,13 +95,27 @@ type PutResponse struct {
 type DeleteInput struct {
 	Bucket    string
 	ObjectKey string
+	VersionId string // Optional: Version ID of the object to delete
 }
 
 // FileDownload makes a GET call and returns a io.ReadCloser.
 // After reading the response body, ensure closing the response.
 func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
+	urlStr := s3.getURL(u.Bucket, u.ObjectKey)
+
+	if u.VersionId != "" {
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return nil, err
+		}
+		q := parsed.Query()
+		q.Set("versionId", u.VersionId)
+		parsed.RawQuery = q.Encode()
+		urlStr = parsed.String()
+	}
+
 	req, err := http.NewRequest(
-		http.MethodGet, s3.getURL(u.Bucket, u.ObjectKey), nil,
+		http.MethodGet, urlStr, nil,
 	)
 	if err != nil {
 		return nil, err
@@ -315,8 +331,21 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 // FileDelete makes a DELETE call with the file written as multipart
 // and on successful upload, checks for 204 No Content.
 func (s3 *S3) FileDelete(u DeleteInput) error {
+	urlStr := s3.getURL(u.Bucket, u.ObjectKey)
+
+	if u.VersionId != "" {
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return err
+		}
+		q := parsed.Query()
+		q.Set("versionId", u.VersionId)
+		parsed.RawQuery = q.Encode()
+		urlStr = parsed.String()
+	}
+
 	req, err := http.NewRequest(
-		http.MethodDelete, s3.getURL(u.Bucket, u.ObjectKey), nil,
+		http.MethodDelete, urlStr, nil,
 	)
 	if err != nil {
 		return err
@@ -351,8 +380,21 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 }
 
 func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
+	urlStr := s3.getURL(u.Bucket, u.ObjectKey)
+
+	if u.VersionId != "" {
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return DetailsResponse{}, err
+		}
+		q := parsed.Query()
+		q.Set("versionId", u.VersionId)
+		parsed.RawQuery = q.Encode()
+		urlStr = parsed.String()
+	}
+
 	req, err := http.NewRequest(
-		http.MethodHead, s3.getURL(u.Bucket, u.ObjectKey), nil,
+		http.MethodHead, urlStr, nil,
 	)
 	if err != nil {
 		return DetailsResponse{}, err

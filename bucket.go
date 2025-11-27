@@ -4,10 +4,15 @@
 package simples3
 
 import (
+	"bytes"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -243,4 +248,190 @@ func (s3 *S3) DeleteBucket(input DeleteBucketInput) error {
 	}
 
 	return nil
+}
+
+// VersioningConfiguration represents the versioning configuration of a bucket.
+type VersioningConfiguration struct {
+	Status    string `xml:"Status"`              // Enabled or Suspended
+	MfaDelete string `xml:"MfaDelete,omitempty"` // Enabled or Disabled
+}
+
+// PutBucketVersioningInput is passed to PutBucketVersioning as a parameter.
+type PutBucketVersioningInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Required: Versioning status (Enabled or Suspended)
+	Status string
+
+	// Optional: MFA Delete status (Enabled or Disabled)
+	// Note: Requires MFA authentication in the request, which is not yet supported
+	MfaDelete string
+}
+
+// GetBucketVersioningOutput is returned by GetBucketVersioning.
+type GetBucketVersioningOutput struct {
+	Status    string
+	MfaDelete string
+}
+
+// versioningConfigurationXML is the internal type for XML marshaling.
+type versioningConfigurationXML struct {
+	XMLName   xml.Name `xml:"VersioningConfiguration"`
+	XMLNS     string   `xml:"xmlns,attr"`
+	Status    string   `xml:"Status"`
+	MfaDelete string   `xml:"MfaDelete,omitempty"`
+}
+
+// PutBucketVersioning sets the versioning configuration for a bucket.
+func (s3 *S3) PutBucketVersioning(input PutBucketVersioningInput) error {
+	// Validate input
+	if input.Bucket == "" {
+		return fmt.Errorf("bucket name is required")
+	}
+	if input.Status != "Enabled" && input.Status != "Suspended" {
+		return fmt.Errorf("status must be 'Enabled' or 'Suspended'")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
+	// Build XML request body
+	config := versioningConfigurationXML{
+		XMLNS:     "http://s3.amazonaws.com/doc/2006-03-01/",
+		Status:    input.Status,
+		MfaDelete: input.MfaDelete,
+	}
+
+	xmlBody, err := xml.Marshal(config)
+	if err != nil {
+		return err
+	}
+
+	// Calculate Content-MD5
+	md5Hash := md5.Sum(xmlBody)
+	contentMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
+
+	// Build URL with ?versioning query parameter
+	baseURL := s3.getURL(input.Bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	parsedURL.RawQuery = "versioning"
+
+	// Create PUT request
+	req, err := http.NewRequest(http.MethodPut, parsedURL.String(), bytes.NewReader(xmlBody))
+	if err != nil {
+		return err
+	}
+
+	// Set headers
+	req.ContentLength = int64(len(xmlBody))
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("Content-MD5", contentMD5)
+
+	// Calculate SHA256
+	h := sha256.New()
+	h.Write(xmlBody)
+	req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h.Sum(nil)))
+	req.Header.Set("Host", req.URL.Host)
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// GetBucketVersioning gets the versioning configuration for a bucket.
+func (s3 *S3) GetBucketVersioning(bucket string) (GetBucketVersioningOutput, error) {
+	// Validate input
+	if bucket == "" {
+		return GetBucketVersioningOutput{}, fmt.Errorf("bucket name is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	// Build URL with ?versioning query parameter
+	baseURL := s3.getURL(bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+	parsedURL.RawQuery = "versioning"
+
+	// Create GET request
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return GetBucketVersioningOutput{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var config VersioningConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		return GetBucketVersioningOutput{}, err
+	}
+
+	return GetBucketVersioningOutput{
+		Status:    config.Status,
+		MfaDelete: config.MfaDelete,
+	}, nil
 }
