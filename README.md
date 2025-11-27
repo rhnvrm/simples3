@@ -17,6 +17,7 @@ using AWS Signature Version 4.
 - **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
 - **Presigned URL generation** for secure browser uploads/downloads (including multipart)
 - **Object Versioning** - Enable versioning, list versions, and access specific object versions
+- **Server-Side Encryption** - Support for SSE-S3 (AES256) and SSE-KMS encryption
 - **IAM credential support** for EC2 instances
 - **Comprehensive test coverage**
 - **Zero dependencies** - uses only Go standard library
@@ -485,7 +486,71 @@ err := s3.FileDelete(simples3.DeleteInput{
 })
 ```
 
-### Multipart Upload
+### Server-Side Encryption
+ 
+ Secure your data at rest using Server-Side Encryption (SSE). SimpleS3 supports both SSE-S3 (AES256) and SSE-KMS.
+ 
+ #### Upload with SSE-S3 (AES256)
+ 
+ ```go
+ _, err := s3.FilePut(simples3.UploadInput{
+     Bucket:               "my-bucket",
+     ObjectKey:            "secure-file.txt",
+     Body:                 strings.NewReader("secret data"),
+     ServerSideEncryption: "AES256",
+ })
+ ```
+ 
+ #### Upload with SSE-KMS
+ 
+ ```go
+ _, err := s3.FilePut(simples3.UploadInput{
+     Bucket:               "my-bucket",
+     ObjectKey:            "kms-encrypted-file.txt",
+     Body:                 strings.NewReader("secret data"),
+     ServerSideEncryption: "aws:kms",
+     SSEKMSKeyId:          "arn:aws:kms:us-east-1:123456789012:key/your-key-id",
+ })
+ ```
+ 
+ #### Multipart Upload with Encryption
+ 
+ ```go
+ output, err := s3.FileUploadMultipart(simples3.MultipartUploadInput{
+     Bucket:               "my-bucket",
+     ObjectKey:            "large-secure-file.mp4",
+     Body:                 file,
+     ServerSideEncryption: "AES256",
+ })
+ ```
+ 
+ #### Copy with Encryption
+ 
+ ```go
+ _, err := s3.CopyObject(simples3.CopyObjectInput{
+     SourceBucket:         "my-bucket",
+     SourceKey:            "original.txt",
+     DestBucket:           "my-bucket",
+     DestKey:              "encrypted-copy.txt",
+     ServerSideEncryption: "AES256",
+ })
+ ```
+ 
+ #### Check Encryption Status
+ 
+ ```go
+ details, err := s3.FileDetails(simples3.DetailsInput{
+     Bucket:    "my-bucket",
+     ObjectKey: "secure-file.txt",
+ })
+ 
+ fmt.Printf("Encryption: %s\n", details.ServerSideEncryption)
+ if details.SSEKMSKeyId != "" {
+     fmt.Printf("KMS Key ID: %s\n", details.SSEKMSKeyId)
+ }
+ ```
+ 
+ ### Multipart Upload
 
 For large files (>100MB), use multipart upload for better performance, resumability, and parallel uploads.
 

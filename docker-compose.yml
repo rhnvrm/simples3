@@ -8,6 +8,7 @@ services:
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_KMS_SECRET_KEY=my-minio-key:eXmCryULA8N6GxvDms8iUHa9t8qUmffLHJdB/e4qPy0=
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"

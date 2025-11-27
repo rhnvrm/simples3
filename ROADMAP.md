@@ -89,13 +89,14 @@ Advanced Features Implemented:
 
 ---
 
-## v0.13.0 - Server-Side Encryption
+## v0.13.0 - Server-Side Encryption ✅ COMPLETED
 **Scope**: Security basics
 **Size**: Small (~150 LOC)
+**Released**: Nov 27, 2025
 
-- [ ] SSE-S3 support (AES256)
-- [ ] SSE-KMS support (key ARN)
-- [ ] Encryption headers in Put/Upload/Copy
+- [x] SSE-S3 support (AES256)
+- [x] SSE-KMS support (key ARN)
+- [x] Encryption headers in Put/Upload/Copy
 
 **Why**: Security is table stakes. Simple to add to existing operations.
 

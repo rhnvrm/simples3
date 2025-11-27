@@ -42,8 +42,12 @@ type DetailsResponse struct {
 	Server        string
 	AmzID2        string
 	AmzRequestID  string
-	AmzMeta       map[string]string
-	ExtraHeaders  map[string]string
+	// Server-side encryption (e.g. "AES256" or "aws:kms")
+	ServerSideEncryption string
+	// KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
+	SSEKMSKeyId string
+	AmzMeta     map[string]string
+	ExtraHeaders map[string]string
 }
 
 // UploadInput is passed to FileUpload as a parameter.
@@ -62,6 +66,11 @@ type UploadInput struct {
 	CustomMetadata map[string]string
 	// Setting key/value pairs adds tags to the object (max 10 tags)
 	Tags map[string]string
+
+	// Server-side encryption (e.g. "AES256" or "aws:kms")
+	ServerSideEncryption string
+	// KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
+	SSEKMSKeyId string
 
 	Body io.ReadSeeker
 }
@@ -187,6 +196,13 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 		req.Header.Set("x-amz-tagging", encodeTagsHeader(u.Tags))
 	}
 
+	if u.ServerSideEncryption != "" {
+		req.Header.Set("x-amz-server-side-encryption", u.ServerSideEncryption)
+	}
+	if u.SSEKMSKeyId != "" {
+		req.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", u.SSEKMSKeyId)
+	}
+
 	req.ContentLength = fSize
 
 	if err := s3.renewIAMToken(); err != nil {
@@ -258,6 +274,14 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 	// Set tags if provided.
 	if len(u.Tags) > 0 {
 		uc.MetaData["x-amz-tagging"] = encodeTagsHeader(u.Tags)
+	}
+
+	// Set server-side encryption
+	if u.ServerSideEncryption != "" {
+		uc.MetaData["x-amz-server-side-encryption"] = u.ServerSideEncryption
+	}
+	if u.SSEKMSKeyId != "" {
+		uc.MetaData["x-amz-server-side-encryption-aws-kms-key-id"] = u.SSEKMSKeyId
 	}
 
 	if err := s3.renewIAMToken(); err != nil {
@@ -445,6 +469,10 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 			out.AmzID2 = getFirstString(v)
 		case "x-amz-request-id":
 			out.AmzRequestID = getFirstString(v)
+		case "x-amz-server-side-encryption":
+			out.ServerSideEncryption = getFirstString(v)
+		case "x-amz-server-side-encryption-aws-kms-key-id":
+			out.SSEKMSKeyId = getFirstString(v)
 		default:
 			if strings.HasPrefix(lk, AMZMetaPrefix) {
 				if out.AmzMeta == nil {
@@ -493,6 +521,12 @@ type CopyObjectInput struct {
 	// Optional: Tags to set on the destination object (max 10 tags)
 	// When set, uses x-amz-tagging-directive: REPLACE
 	Tags map[string]string
+
+	// Optional: Server-side encryption (e.g. "AES256" or "aws:kms")
+	ServerSideEncryption string
+
+	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
+	SSEKMSKeyId string
 }
 
 // CopyObjectOutput is returned by CopyObject.
@@ -565,6 +599,13 @@ func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
 	// 	req.Header.Set("x-amz-tagging-directive", "REPLACE")
 	// 	req.Header.Set("x-amz-tagging", encodeTagsHeader(input.Tags))
 	// }
+
+	if input.ServerSideEncryption != "" {
+		req.Header.Set("x-amz-server-side-encryption", input.ServerSideEncryption)
+	}
+	if input.SSEKMSKeyId != "" {
+		req.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", input.SSEKMSKeyId)
+	}
 
 	// Sign the request
 	if err := s3.signRequest(req); err != nil {

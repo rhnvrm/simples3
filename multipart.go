@@ -35,6 +35,11 @@ type InitiateMultipartUploadInput struct {
 	ContentType    string            // Optional: content type
 	CustomMetadata map[string]string // Optional: x-amz-meta-* headers
 	ACL            string            // Optional: x-amz-acl
+
+	// Optional: Server-side encryption (e.g. "AES256" or "aws:kms")
+	ServerSideEncryption string
+	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
+	SSEKMSKeyId string
 }
 
 // InitiateMultipartUploadOutput contains the response from initiating a multipart upload
@@ -79,6 +84,14 @@ func (s3 *S3) InitiateMultipartUpload(input InitiateMultipartUploadInput) (Initi
 
 	if input.ACL != "" {
 		req.Header.Set("x-amz-acl", input.ACL)
+	}
+
+	// Set server-side encryption
+	if input.ServerSideEncryption != "" {
+		req.Header.Set("x-amz-server-side-encryption", input.ServerSideEncryption)
+	}
+	if input.SSEKMSKeyId != "" {
+		req.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", input.SSEKMSKeyId)
 	}
 
 	// Set custom metadata
@@ -638,6 +651,11 @@ type MultipartUploadInput struct {
 	MaxRetries     int               // Optional: default 3
 	Concurrency    int               // Optional: default 1 (sequential)
 	OnProgress     ProgressFunc      // Optional: progress callback
+
+	// Optional: Server-side encryption (e.g. "AES256" or "aws:kms")
+	ServerSideEncryption string
+	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
+	SSEKMSKeyId string
 }
 
 // MultipartUploadOutput contains the response from a multipart upload
@@ -682,11 +700,13 @@ func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOu
 
 	// Initiate multipart upload
 	initOutput, err := s3.InitiateMultipartUpload(InitiateMultipartUploadInput{
-		Bucket:         input.Bucket,
-		ObjectKey:      input.ObjectKey,
-		ContentType:    input.ContentType,
-		CustomMetadata: input.CustomMetadata,
-		ACL:            input.ACL,
+		Bucket:               input.Bucket,
+		ObjectKey:            input.ObjectKey,
+		ContentType:          input.ContentType,
+		CustomMetadata:       input.CustomMetadata,
+		ACL:                  input.ACL,
+		ServerSideEncryption: input.ServerSideEncryption,
+		SSEKMSKeyId:          input.SSEKMSKeyId,
 	})
 	if err != nil {
 		return MultipartUploadOutput{}, err
