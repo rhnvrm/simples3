@@ -45,8 +45,8 @@ type DetailsResponse struct {
 	// Server-side encryption (e.g. "AES256" or "aws:kms")
 	ServerSideEncryption string
 	// KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
-	SSEKMSKeyId string
-	AmzMeta     map[string]string
+	SSEKMSKeyId  string
+	AmzMeta      map[string]string
 	ExtraHeaders map[string]string
 }
 
