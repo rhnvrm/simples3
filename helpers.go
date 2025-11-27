@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -94,4 +96,30 @@ func encodePath(pathName string) string {
 		}
 	}
 	return encodedPathname.String()
+}
+
+// encodeTagsHeader encodes tags as a URL-encoded key=value string for the x-amz-tagging header.
+// Format: key1=value1&key2=value2
+// Keys are sorted for consistency.
+func encodeTagsHeader(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+
+	// Sort keys for consistent output
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Build encoded string
+	parts := make([]string, 0, len(tags))
+	for _, k := range keys {
+		encodedKey := url.QueryEscape(k)
+		encodedValue := url.QueryEscape(tags[k])
+		parts = append(parts, encodedKey+"="+encodedValue)
+	}
+
+	return strings.Join(parts, "&")
 }

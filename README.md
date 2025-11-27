@@ -340,6 +340,83 @@ func main() {
 }
 ```
 
+### Object Tagging
+
+S3 object tags are key-value pairs that you can use to categorize, organize, and manage objects. Each object can have up to 10 tags.
+
+#### Put Tags on an Object
+
+Set or replace all tags on an existing object:
+
+```go
+err := s3.PutObjectTagging(simples3.PutObjectTaggingInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "my-file.txt",
+    Tags: map[string]string{
+        "Environment": "production",
+        "Project":     "website",
+        "Version":     "v1.2.0",
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### Get Tags from an Object
+
+Retrieve all tags from an object:
+
+```go
+output, err := s3.GetObjectTagging(simples3.GetObjectTaggingInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "my-file.txt",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+for key, value := range output.Tags {
+    fmt.Printf("%s: %s\n", key, value)
+}
+```
+
+#### Delete All Tags from an Object
+
+Remove all tags from an object:
+
+```go
+err := s3.DeleteObjectTagging(simples3.DeleteObjectTaggingInput{
+    Bucket:    "my-bucket",
+    ObjectKey: "my-file.txt",
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### Upload with Tags
+
+You can set tags when uploading an object using `FilePut`:
+
+```go
+_, err := s3.FilePut(simples3.UploadInput{
+    Bucket:      "my-bucket",
+    ObjectKey:   "my-file.txt",
+    ContentType: "text/plain",
+    Body:        file,
+    Tags: map[string]string{
+        "Environment": "production",
+        "Department":  "engineering",
+    },
+})
+```
+
+Note: Tag support during upload varies by operation:
+- **FilePut** (PUT): ✅ Full support
+- **FileUpload** (POST): ⚠️  AWS S3 supported, MinIO limited (does not support tags in POST policy)
+- **CopyObject**: ✅ Full support (handles MinIO/R2 signature quirks automatically)
+
 ### Multipart Upload
 
 For large files (>100MB), use multipart upload for better performance, resumability, and parallel uploads.

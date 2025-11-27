@@ -101,16 +101,33 @@ Advanced Features Implemented:
 
 ---
 
-## v0.14.0 - Object Tagging
+## v0.14.0 - Object Tagging ✅ COMPLETED
 **Scope**: Metadata management
-**Size**: Small (4 APIs, ~200 LOC)
+**Size**: Small (4 APIs, ~250 LOC)
+**Released**: Nov 27, 2025
 
-- [ ] PutObjectTagging
-- [ ] GetObjectTagging
-- [ ] DeleteObjectTagging
-- [ ] Tagging support in Put/Upload/Copy
+Core APIs:
+- [x] PutObjectTagging
+- [x] GetObjectTagging
+- [x] DeleteObjectTagging
+
+Tagging Support in Operations:
+- [x] FilePut (PUT upload)
+- [x] FileUpload (POST upload) - AWS S3 only, MinIO limited
+- [x] CopyObject - AWS S3 supported, MinIO/R2 handled automatically
+
+Features Implemented:
+- [x] Put/get/delete tags on existing objects (up to 10 tags per object)
+- [x] Set tags during object upload operations
+- [x] Tags field in UploadInput and CopyObjectInput
+- [x] URL-encoded tag header formatting
+- [x] Input validation (max 10 tags, required fields)
+- [x] Integration tests with MinIO (and workaround for signature issues)
+- [x] Comprehensive documentation in README
 
 **Why**: Common requirement for organization/billing. Simple XML operations.
+
+**Note**: Some MinIO limitations exist for tagging via POST uploads. CopyObject tagging is handled via a 2-step process (copy then tag) to support both AWS and MinIO/R2.
 
 ---
 

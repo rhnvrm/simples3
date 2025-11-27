@@ -58,6 +58,8 @@ type UploadInput struct {
 	// Setting key/value pairs adds user-defined metadata
 	// keys to the object, prefixed with AMZMetaPrefix.
 	CustomMetadata map[string]string
+	// Setting key/value pairs adds tags to the object (max 10 tags)
+	Tags map[string]string
 
 	Body io.ReadSeeker
 }
@@ -165,6 +167,10 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 		req.Header.Set("x-amz-acl", u.ACL)
 	}
 
+	if len(u.Tags) > 0 {
+		req.Header.Set("x-amz-tagging", encodeTagsHeader(u.Tags))
+	}
+
 	req.ContentLength = fSize
 
 	if err := s3.renewIAMToken(); err != nil {
@@ -231,6 +237,11 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		}
 
 		uc.MetaData[k] = v
+	}
+
+	// Set tags if provided.
+	if len(u.Tags) > 0 {
+		uc.MetaData["x-amz-tagging"] = encodeTagsHeader(u.Tags)
 	}
 
 	if err := s3.renewIAMToken(); err != nil {
@@ -436,6 +447,10 @@ type CopyObjectInput struct {
 
 	// Optional: Custom metadata (only used when MetadataDirective = REPLACE)
 	CustomMetadata map[string]string
+
+	// Optional: Tags to set on the destination object (max 10 tags)
+	// When set, uses x-amz-tagging-directive: REPLACE
+	Tags map[string]string
 }
 
 // CopyObjectOutput is returned by CopyObject.
@@ -495,6 +510,20 @@ func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
 		}
 	}
 
+	// Set tags if provided (with REPLACE directive to override source tags)
+	// Note: x-amz-tagging-directive causes signature errors in MinIO despite being supported in code
+	// See: https://github.com/minio/minio/pull/9711, https://github.com/minio/minio/pull/9478
+	// Without directive: tags are copied from source (default S3 behavior)
+	// With directive: signature mismatch error in MinIO (works on AWS S3)
+	//
+	// WORKAROUND: To support both MinIO and AWS without signature errors, we do not set
+	// the tagging headers here. Instead, we apply the tags using PutObjectTagging
+	// after the copy operation is complete.
+	// if len(input.Tags) > 0 {
+	// 	req.Header.Set("x-amz-tagging-directive", "REPLACE")
+	// 	req.Header.Set("x-amz-tagging", encodeTagsHeader(input.Tags))
+	// }
+
 	// Sign the request
 	if err := s3.signRequest(req); err != nil {
 		return CopyObjectOutput{}, err
@@ -527,6 +556,21 @@ func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
 	var result copyObjectResult
 	if err := xml.Unmarshal(body, &result); err != nil {
 		return CopyObjectOutput{}, err
+	}
+
+	// Apply tags if provided (2-step workaround)
+	if len(input.Tags) > 0 {
+		err := s3.PutObjectTagging(PutObjectTaggingInput{
+			Bucket:    input.DestBucket,
+			ObjectKey: input.DestKey,
+			Tags:      input.Tags,
+		})
+		if err != nil {
+			return CopyObjectOutput{
+				ETag:         result.ETag,
+				LastModified: result.LastModified,
+			}, fmt.Errorf("copy succeeded but tagging failed: %v", err)
+		}
 	}
 
 	return CopyObjectOutput{
