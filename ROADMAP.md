@@ -35,135 +35,41 @@ Split simples3.go into logical modules:
 
 ---
 
-## v0.11.0 - Bucket & Object Operations ✅ COMPLETED
-**Scope**: Essential bucket management + object manipulation for CLI
-**Size**: Medium (5 APIs, ~400 LOC)
-**Released**: Nov 26, 2025
-
-Bucket Operations:
-- [x] ListBuckets
-- [x] CreateBucket (with region support)
-- [x] DeleteBucket
-
-Object Operations:
-- [x] CopyObject (within/across buckets)
-- [x] DeleteObjects (batch delete up to 1000 objects)
-
-**Why**: These operations unblock CLI development (mv, sync, batch operations). Combined release for efficiency.
-
-**Note**: DeleteObjects has a known compatibility issue with MinIO that requires further investigation. The implementation follows AWS S3 specification correctly.
-
----
-
-## v0.12.0 - Multipart Upload ✅ COMPLETED
-**Scope**: Large file support with parallel uploads, progress tracking, and presigned URLs
-**Size**: Large (10 APIs/features, ~800 LOC)
+## v0.11.0 - Core Library Features ✅ COMPLETED
+**Scope**: Consolidated release of all core library features prior to CLI development
 **Released**: Nov 27, 2025
 
-Core APIs:
-- [x] InitiateMultipartUpload
-- [x] UploadPart
-- [x] CompleteMultipartUpload
-- [x] AbortMultipartUpload
-- [x] ListParts
+This release consolidates all previously planned feature sets (v0.11.0 - v0.16.0) into a single stable library release.
 
-High-Level Features:
-- [x] FileUploadMultipart (automatic chunking)
-- [x] uploadPartWithRetry (exponential backoff retry logic)
-- [x] uploadPartsParallel (concurrent part uploads with worker pool)
-- [x] Progress callbacks (real-time upload progress)
-- [x] GeneratePresignedUploadPartURL (browser-based multipart uploads)
+### Feature Set 1: Bucket & Object Operations
+- ListBuckets, CreateBucket (with region), DeleteBucket
+- CopyObject (within/across buckets)
+- DeleteObjects (batch delete)
 
-Advanced Features Implemented:
-- [x] Automatic file chunking with configurable part sizes (5MB-5GB)
-- [x] Parallel upload worker pool (configurable concurrency)
-- [x] Retry logic with exponential backoff (3 retries default, configurable)
-- [x] Real-time progress tracking with upload speed calculation
-- [x] Automatic cleanup on errors (AbortMultipartUpload)
-- [x] Support for resumable uploads via ListParts
-- [x] Comprehensive input validation (part size, part numbers, etc.)
-- [x] Integration tests with MinIO (500+ LOC)
-- [x] File integrity verification across all upload modes
+### Feature Set 2: Multipart Upload
+- Complete multipart upload API (Initiate, UploadPart, Complete, Abort, ListParts)
+- High-level `FileUploadMultipart` with automatic chunking and parallel uploads
+- Retry logic with exponential backoff and progress tracking
+- Presigned URLs for multipart uploads
 
-**Why**: Critical for large files (>100MB). Enables resumable uploads, parallel transfers, and better performance.
+### Feature Set 3: Server-Side Encryption
+- SSE-S3 (AES256) and SSE-KMS support
+- Encryption headers in Put/Upload/Copy
 
----
+### Feature Set 4: Object Tagging
+- Put/Get/Delete Object Tagging
+- Tagging support in upload/copy operations
 
-## v0.13.0 - Server-Side Encryption ✅ COMPLETED
-**Scope**: Security basics
-**Size**: Small (~150 LOC)
-**Released**: Nov 27, 2025
+### Feature Set 5: Object Versioning
+- Put/Get Bucket Versioning
+- ListObjectVersions
+- Version-aware operations (Download, Delete, ACLs)
 
-- [x] SSE-S3 support (AES256)
-- [x] SSE-KMS support (key ARN)
-- [x] Encryption headers in Put/Upload/Copy
+### Feature Set 6: ACLs & Lifecycle
+- Put/Get Bucket & Object ACLs (Canned & Custom Policies)
+- Put/Get/Delete Bucket Lifecycle configuration
 
-**Why**: Security is table stakes. Simple to add to existing operations.
-
----
-
-## v0.14.0 - Object Tagging ✅ COMPLETED
-**Scope**: Metadata management
-**Size**: Small (4 APIs, ~250 LOC)
-**Released**: Nov 27, 2025
-
-Core APIs:
-- [x] PutObjectTagging
-- [x] GetObjectTagging
-- [x] DeleteObjectTagging
-
-Tagging Support in Operations:
-- [x] FilePut (PUT upload)
-- [x] FileUpload (POST upload) - AWS S3 only, MinIO limited
-- [x] CopyObject - AWS S3 supported, MinIO/R2 handled automatically
-
-Features Implemented:
-- [x] Put/get/delete tags on existing objects (up to 10 tags per object)
-- [x] Set tags during object upload operations
-- [x] Tags field in UploadInput and CopyObjectInput
-- [x] URL-encoded tag header formatting
-- [x] Input validation (max 10 tags, required fields)
-- [x] Integration tests with MinIO (and workaround for signature issues)
-- [x] Comprehensive documentation in README
-
-**Why**: Common requirement for organization/billing. Simple XML operations.
-
-**Note**: Some MinIO limitations exist for tagging via POST uploads. CopyObject tagging is handled via a 2-step process (copy then tag) to support both AWS and MinIO/R2.
-
----
-
-## v0.15.0 - Object Versioning ✅ COMPLETED
-**Scope**: Version control
-**Size**: Medium (5 APIs, ~300 LOC)
-**Released**: Nov 27, 2025
-
-- [x] PutBucketVersioning
-- [x] GetBucketVersioning
-- [x] ListObjectVersions
-- [x] GetObjectVersion (via FileDownload)
-- [x] DeleteObjectVersion (via FileDelete)
-
-**Why**: Important for data safety. More complex due to version handling.
-
----
-
-## v0.16.0 - ACLs & Lifecycle ✅ COMPLETED
-**Scope**: Advanced management
-**Size**: Medium (9 APIs, ~500 LOC)
-**Released**: Nov 27, 2025
-
-ACLs:
-- [x] PutObjectAcl
-- [x] GetObjectAcl
-- [x] PutBucketAcl
-- [x] GetBucketAcl
-
-Lifecycle:
-- [x] PutBucketLifecycle
-- [x] GetBucketLifecycle
-- [x] DeleteBucketLifecycle
-
-**Why**: Grouped advanced features. Completes library API surface.
+**Why**: Consolidating these features provides a complete, feature-rich library foundation for the upcoming CLI tool.
 
 ---
 
