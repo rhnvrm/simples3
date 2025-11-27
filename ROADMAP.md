@@ -146,20 +146,21 @@ Features Implemented:
 
 ---
 
-## v0.16.0 - ACLs & Lifecycle
+## v0.16.0 - ACLs & Lifecycle ✅ COMPLETED
 **Scope**: Advanced management
 **Size**: Medium (9 APIs, ~500 LOC)
+**Released**: Nov 27, 2025
 
 ACLs:
-- [ ] PutObjectAcl
-- [ ] GetObjectAcl
-- [ ] PutBucketAcl
-- [ ] GetBucketAcl
+- [x] PutObjectAcl
+- [x] GetObjectAcl
+- [x] PutBucketAcl
+- [x] GetBucketAcl
 
 Lifecycle:
-- [ ] PutBucketLifecycle
-- [ ] GetBucketLifecycle
-- [ ] DeleteBucketLifecycle
+- [x] PutBucketLifecycle
+- [x] GetBucketLifecycle
+- [x] DeleteBucketLifecycle
 
 **Why**: Grouped advanced features. Completes library API surface.
 

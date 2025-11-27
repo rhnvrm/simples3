@@ -17,7 +17,7 @@ func TestVersioning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	
+
 	// Cleanup function
 	defer func() {
 		// List all versions and delete markers to clean up
@@ -52,25 +52,25 @@ func TestVersioning(t *testing.T) {
 	}
 
 	key := "test-object.txt"
-	
+
 	// 3. Upload v1
 	_, err = s3.FilePut(UploadInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
-		Body: strings.NewReader("v1"),
+		Body:      strings.NewReader("v1"),
 	})
 	if err != nil {
 		t.Fatalf("FilePut v1 failed: %v", err)
 	}
-	
+
 	// Sleep briefly to ensure timestamp difference (MinIO sometimes has granularity issues)
 	time.Sleep(1 * time.Second)
 
 	// 4. Upload v2
 	_, err = s3.FilePut(UploadInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
-		Body: strings.NewReader("v2"),
+		Body:      strings.NewReader("v2"),
 	})
 	if err != nil {
 		t.Fatalf("FilePut v2 failed: %v", err)
@@ -106,7 +106,7 @@ func TestVersioning(t *testing.T) {
 
 	// 6. Download v1 specific version
 	rc, err := s3.FileDownload(DownloadInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
 		VersionId: v1Id,
 	})
@@ -121,7 +121,7 @@ func TestVersioning(t *testing.T) {
 
 	// 7. Download v2 specific version
 	rc, err = s3.FileDownload(DownloadInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
 		VersionId: v2Id,
 	})
@@ -133,10 +133,10 @@ func TestVersioning(t *testing.T) {
 	if string(content) != "v2" {
 		t.Errorf("Expected v2 content 'v2', got '%s'", string(content))
 	}
-	
+
 	// 8. Get Details for v1
 	details, err := s3.FileDetails(DetailsInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
 		VersionId: v1Id,
 	})
@@ -149,7 +149,7 @@ func TestVersioning(t *testing.T) {
 
 	// 9. Delete v2 (latest)
 	err = s3.FileDelete(DeleteInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
 		VersionId: v2Id,
 	})
@@ -159,7 +159,7 @@ func TestVersioning(t *testing.T) {
 
 	// 10. Verify current object is v1
 	rc, err = s3.FileDownload(DownloadInput{
-		Bucket: bucket,
+		Bucket:    bucket,
 		ObjectKey: key,
 	})
 	if err != nil {

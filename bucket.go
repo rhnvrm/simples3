@@ -435,3 +435,506 @@ func (s3 *S3) GetBucketVersioning(bucket string) (GetBucketVersioningOutput, err
 		MfaDelete: config.MfaDelete,
 	}, nil
 }
+
+// --- ACL Operations ---
+
+// AccessControlPolicy represents the Access Control List (ACL) for a bucket or object.
+type AccessControlPolicy struct {
+	XMLName           xml.Name `xml:"AccessControlPolicy"`
+	XMLNS             string   `xml:"xmlns,attr,omitempty"`
+	Owner             Owner    `xml:"Owner"`
+	AccessControlList []Grant  `xml:"AccessControlList>Grant"`
+}
+
+// Owner represents the owner of the bucket or object.
+type Owner struct {
+	ID          string `xml:"ID,omitempty"`
+	DisplayName string `xml:"DisplayName,omitempty"`
+}
+
+// Grant represents a permission grant.
+type Grant struct {
+	Grantee    Grantee `xml:"Grantee"`
+	Permission string  `xml:"Permission"`
+}
+
+// Grantee represents the recipient of the permission grant.
+type Grantee struct {
+	XMLNS        string `xml:"xmlns:xsi,attr,omitempty"`
+	Type         string `xml:"xsi:type,attr"` // CanonicalUser, AmazonCustomerByEmail, Group
+	ID           string `xml:"ID,omitempty"`
+	DisplayName  string `xml:"DisplayName,omitempty"`
+	URI          string `xml:"URI,omitempty"`          // For Group
+	EmailAddress string `xml:"EmailAddress,omitempty"` // For AmazonCustomerByEmail
+}
+
+// PutBucketAclInput is passed to PutBucketAcl.
+type PutBucketAclInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Optional: Canned ACL (private, public-read, public-read-write, authenticated-read)
+	// If CannedACL is set, AccessControlPolicy is ignored.
+	CannedACL string
+
+	// Optional: Full Access Control Policy
+	AccessControlPolicy *AccessControlPolicy
+}
+
+// PutBucketAcl sets the Access Control List (ACL) for a bucket.
+// You can either use a CannedACL OR provide a full AccessControlPolicy.
+func (s3 *S3) PutBucketAcl(input PutBucketAclInput) error {
+	// Validate input
+	if input.Bucket == "" {
+		return fmt.Errorf("bucket name is required")
+	}
+	if input.CannedACL == "" && input.AccessControlPolicy == nil {
+		return fmt.Errorf("either CannedACL or AccessControlPolicy must be provided")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
+	// Build URL with ?acl query parameter
+	baseURL := s3.getURL(input.Bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	parsedURL.RawQuery = "acl"
+
+	var req *http.Request
+	var bodyReader io.Reader
+	var contentMD5 string
+	var sha256Hash string
+
+	if input.AccessControlPolicy != nil {
+		// Use custom ACL body
+		input.AccessControlPolicy.XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
+		// Ensure namespace is set on Grantees if needed, though usually top level is enough.
+		// Some S3 implementations require xsi namespace.
+		for i := range input.AccessControlPolicy.AccessControlList {
+			input.AccessControlPolicy.AccessControlList[i].Grantee.XMLNS = "http://www.w3.org/2001/XMLSchema-instance"
+		}
+
+		xmlBody, err := xml.Marshal(input.AccessControlPolicy)
+		if err != nil {
+			return err
+		}
+
+		bodyReader = bytes.NewReader(xmlBody)
+
+		// Calculate MD5
+		md5Sum := md5.Sum(xmlBody)
+		contentMD5 = base64.StdEncoding.EncodeToString(md5Sum[:])
+
+		// Calculate SHA256
+		h := sha256.New()
+		h.Write(xmlBody)
+		sha256Hash = fmt.Sprintf("%x", h.Sum(nil))
+
+		req, err = http.NewRequest(http.MethodPut, parsedURL.String(), bodyReader)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = int64(len(xmlBody))
+		req.Header.Set("Content-Type", "application/xml")
+		req.Header.Set("Content-MD5", contentMD5)
+		req.Header.Set("x-amz-content-sha256", sha256Hash)
+
+	} else {
+		// Use Canned ACL via header
+		req, err = http.NewRequest(http.MethodPut, parsedURL.String(), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("x-amz-acl", input.CannedACL)
+		// Empty body SHA256
+		h := sha256.New()
+		sha256Hash = fmt.Sprintf("%x", h.Sum(nil))
+		req.Header.Set("x-amz-content-sha256", sha256Hash)
+	}
+
+	req.Header.Set("Host", req.URL.Host)
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// GetBucketAcl gets the Access Control List (ACL) for a bucket.
+func (s3 *S3) GetBucketAcl(bucket string) (AccessControlPolicy, error) {
+	// Validate input
+	if bucket == "" {
+		return AccessControlPolicy{}, fmt.Errorf("bucket name is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Build URL with ?acl query parameter
+	baseURL := s3.getURL(bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+	parsedURL.RawQuery = "acl"
+
+	// Create GET request
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return AccessControlPolicy{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var policy AccessControlPolicy
+	if err := xml.Unmarshal(body, &policy); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	return policy, nil
+}
+
+// --- Lifecycle Operations ---
+
+// LifecycleConfiguration represents the lifecycle configuration for a bucket.
+type LifecycleConfiguration struct {
+	XMLName xml.Name        `xml:"LifecycleConfiguration"`
+	XMLNS   string          `xml:"xmlns,attr,omitempty"`
+	Rules   []LifecycleRule `xml:"Rule"`
+}
+
+// LifecycleRule represents a single lifecycle rule.
+type LifecycleRule struct {
+	ID     string           `xml:"ID,omitempty"`
+	Status string           `xml:"Status"` // Enabled or Disabled
+	Filter *LifecycleFilter `xml:"Filter,omitempty"`
+	// Legacy Prefix support (S3 supports both, but prefer Filter for V2)
+	// If Prefix is provided here, do not use Filter.
+	Prefix                         *string                                  `xml:"Prefix,omitempty"`
+	Expiration                     *LifecycleExpiration                     `xml:"Expiration,omitempty"`
+	Transitions                    []LifecycleTransition                    `xml:"Transition,omitempty"`
+	NoncurrentVersionExpiration    *LifecycleNoncurrentVersionExpiration    `xml:"NoncurrentVersionExpiration,omitempty"`
+	NoncurrentVersionTransitions   []LifecycleNoncurrentVersionTransition   `xml:"NoncurrentVersionTransition,omitempty"`
+	AbortIncompleteMultipartUpload *LifecycleAbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload,omitempty"`
+}
+
+// LifecycleFilter represents the filter for a lifecycle rule.
+type LifecycleFilter struct {
+	Prefix string `xml:"Prefix,omitempty"`
+	Tag    *Tag   `xml:"Tag,omitempty"`
+	And    *struct {
+		Prefix string `xml:"Prefix,omitempty"`
+		Tags   []Tag  `xml:"Tag,omitempty"`
+	} `xml:"And,omitempty"`
+}
+
+// LifecycleExpiration represents the expiration action.
+type LifecycleExpiration struct {
+	Date                      string `xml:"Date,omitempty"` // ISO 8601 format
+	Days                      int    `xml:"Days,omitempty"`
+	ExpiredObjectDeleteMarker bool   `xml:"ExpiredObjectDeleteMarker,omitempty"`
+}
+
+// LifecycleTransition represents a transition action.
+type LifecycleTransition struct {
+	Date         string `xml:"Date,omitempty"`
+	Days         int    `xml:"Days,omitempty"`
+	StorageClass string `xml:"StorageClass"`
+}
+
+// LifecycleNoncurrentVersionExpiration represents expiration for noncurrent versions.
+type LifecycleNoncurrentVersionExpiration struct {
+	NoncurrentDays int `xml:"NoncurrentDays"`
+}
+
+// LifecycleNoncurrentVersionTransition represents transition for noncurrent versions.
+type LifecycleNoncurrentVersionTransition struct {
+	NoncurrentDays int    `xml:"NoncurrentDays"`
+	StorageClass   string `xml:"StorageClass"`
+}
+
+// LifecycleAbortIncompleteMultipartUpload represents abort action for incomplete uploads.
+type LifecycleAbortIncompleteMultipartUpload struct {
+	DaysAfterInitiation int `xml:"DaysAfterInitiation"`
+}
+
+// PutBucketLifecycleInput is passed to PutBucketLifecycle.
+type PutBucketLifecycleInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Required: The lifecycle configuration
+	Configuration *LifecycleConfiguration
+}
+
+// PutBucketLifecycle sets the lifecycle configuration for a bucket.
+func (s3 *S3) PutBucketLifecycle(input PutBucketLifecycleInput) error {
+	// Validate input
+	if input.Bucket == "" {
+		return fmt.Errorf("bucket name is required")
+	}
+	if input.Configuration == nil || len(input.Configuration.Rules) == 0 {
+		return fmt.Errorf("lifecycle configuration with at least one rule is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
+	// Build URL with ?lifecycle query parameter
+	baseURL := s3.getURL(input.Bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	parsedURL.RawQuery = "lifecycle"
+
+	// Set XML Namespace
+	input.Configuration.XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
+
+	xmlBody, err := xml.Marshal(input.Configuration)
+	if err != nil {
+		return err
+	}
+
+	// Calculate MD5
+	md5Hash := md5.Sum(xmlBody)
+	contentMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
+
+	// Calculate SHA256
+	h := sha256.New()
+	h.Write(xmlBody)
+	sha256Hash := fmt.Sprintf("%x", h.Sum(nil))
+
+	// Create PUT request
+	req, err := http.NewRequest(http.MethodPut, parsedURL.String(), bytes.NewReader(xmlBody))
+	if err != nil {
+		return err
+	}
+
+	req.ContentLength = int64(len(xmlBody))
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("Content-MD5", contentMD5)
+	req.Header.Set("x-amz-content-sha256", sha256Hash)
+	req.Header.Set("Host", req.URL.Host)
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// GetBucketLifecycle gets the lifecycle configuration for a bucket.
+func (s3 *S3) GetBucketLifecycle(bucket string) (LifecycleConfiguration, error) {
+	// Validate input
+	if bucket == "" {
+		return LifecycleConfiguration{}, fmt.Errorf("bucket name is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	// Build URL with ?lifecycle query parameter
+	baseURL := s3.getURL(bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return LifecycleConfiguration{}, err
+	}
+	parsedURL.RawQuery = "lifecycle"
+
+	// Create GET request
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		// S3 returns 404 if no lifecycle configuration exists
+		if res.StatusCode == http.StatusNotFound {
+			// Check if it's actually "NoSuchLifecycleConfiguration"
+			if strings.Contains(string(body), "NoSuchLifecycleConfiguration") {
+				return LifecycleConfiguration{}, fmt.Errorf("no lifecycle configuration found")
+			}
+		}
+		return LifecycleConfiguration{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var config LifecycleConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		return LifecycleConfiguration{}, err
+	}
+
+	return config, nil
+}
+
+// DeleteBucketLifecycle deletes the lifecycle configuration for a bucket.
+func (s3 *S3) DeleteBucketLifecycle(input DeleteBucketInput) error {
+	// Reuse DeleteBucketInput since it just needs the bucket name
+
+	// Validate input
+	if input.Bucket == "" {
+		return fmt.Errorf("bucket name is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
+	// Build URL with ?lifecycle query parameter
+	baseURL := s3.getURL(input.Bucket)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	parsedURL.RawQuery = "lifecycle"
+
+	// Create DELETE request
+	req, err := http.NewRequest(http.MethodDelete, parsedURL.String(), nil)
+	if err != nil {
+		return err
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	// Handle non-success status codes
+	// AWS returns 204 No Content on successful deletion
+	if res.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	return nil
+}

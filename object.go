@@ -777,3 +777,223 @@ func (s3 *S3) DeleteObjects(input DeleteObjectsInput) (DeleteObjectsOutput, erro
 		Errors:  result.Errors,
 	}, nil
 }
+
+// --- ACL Operations ---
+
+// PutObjectAclInput is passed to PutObjectAcl.
+type PutObjectAclInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Required: The object key
+	ObjectKey string
+
+	// Optional: Version ID of the object
+	VersionId string
+
+	// Optional: Canned ACL (private, public-read, public-read-write, authenticated-read)
+	// If CannedACL is set, AccessControlPolicy is ignored.
+	CannedACL string
+
+	// Optional: Full Access Control Policy
+	AccessControlPolicy *AccessControlPolicy
+}
+
+// PutObjectAcl sets the Access Control List (ACL) for an object.
+// You can either use a CannedACL OR provide a full AccessControlPolicy.
+func (s3 *S3) PutObjectAcl(input PutObjectAclInput) error {
+	// Validate input
+	if input.Bucket == "" {
+		return fmt.Errorf("bucket name is required")
+	}
+	if input.ObjectKey == "" {
+		return fmt.Errorf("object key is required")
+	}
+	if input.CannedACL == "" && input.AccessControlPolicy == nil {
+		return fmt.Errorf("either CannedACL or AccessControlPolicy must be provided")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return err
+	}
+
+	// Build URL with ?acl query parameter
+	baseURL := s3.getURL(input.Bucket, input.ObjectKey)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	q := parsedURL.Query()
+	q.Set("acl", "")
+	if input.VersionId != "" {
+		q.Set("versionId", input.VersionId)
+	}
+	parsedURL.RawQuery = q.Encode()
+
+	var req *http.Request
+	var bodyReader io.Reader
+	var contentMD5 string
+	var sha256Hash string
+
+	if input.AccessControlPolicy != nil {
+		// Use custom ACL body
+		input.AccessControlPolicy.XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
+		// Ensure namespace is set on Grantees if needed
+		for i := range input.AccessControlPolicy.AccessControlList {
+			input.AccessControlPolicy.AccessControlList[i].Grantee.XMLNS = "http://www.w3.org/2001/XMLSchema-instance"
+		}
+
+		xmlBody, err := xml.Marshal(input.AccessControlPolicy)
+		if err != nil {
+			return err
+		}
+
+		bodyReader = bytes.NewReader(xmlBody)
+
+		// Calculate MD5
+		md5Sum := md5.Sum(xmlBody)
+		contentMD5 = base64.StdEncoding.EncodeToString(md5Sum[:])
+
+		// Calculate SHA256
+		h := sha256.New()
+		h.Write(xmlBody)
+		sha256Hash = fmt.Sprintf("%x", h.Sum(nil))
+
+		req, err = http.NewRequest(http.MethodPut, parsedURL.String(), bodyReader)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = int64(len(xmlBody))
+		req.Header.Set("Content-Type", "application/xml")
+		req.Header.Set("Content-MD5", contentMD5)
+		req.Header.Set("x-amz-content-sha256", sha256Hash)
+
+	} else {
+		// Use Canned ACL via header
+		req, err = http.NewRequest(http.MethodPut, parsedURL.String(), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("x-amz-acl", input.CannedACL)
+		// Empty body SHA256
+		h := sha256.New()
+		sha256Hash = fmt.Sprintf("%x", h.Sum(nil))
+		req.Header.Set("x-amz-content-sha256", sha256Hash)
+	}
+
+	req.Header.Set("Host", req.URL.Host)
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// GetObjectAclInput is passed to GetObjectAcl.
+type GetObjectAclInput struct {
+	// Required: The name of the bucket
+	Bucket string
+
+	// Required: The object key
+	ObjectKey string
+
+	// Optional: Version ID of the object
+	VersionId string
+}
+
+// GetObjectAcl gets the Access Control List (ACL) for an object.
+func (s3 *S3) GetObjectAcl(input GetObjectAclInput) (AccessControlPolicy, error) {
+	// Validate input
+	if input.Bucket == "" {
+		return AccessControlPolicy{}, fmt.Errorf("bucket name is required")
+	}
+	if input.ObjectKey == "" {
+		return AccessControlPolicy{}, fmt.Errorf("object key is required")
+	}
+
+	// Renew IAM token if needed
+	if err := s3.renewIAMToken(); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Build URL with ?acl query parameter
+	baseURL := s3.getURL(input.Bucket, input.ObjectKey)
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+	q := parsedURL.Query()
+	q.Set("acl", "")
+	if input.VersionId != "" {
+		q.Set("versionId", input.VersionId)
+	}
+	parsedURL.RawQuery = q.Encode()
+
+	// Create GET request
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Sign the request
+	if err := s3.signRequest(req); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Execute request
+	client := s3.getClient()
+	res, err := client.Do(req)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	defer func() {
+		res.Body.Close()
+		io.Copy(io.Discard, res.Body)
+	}()
+
+	// Read response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	// Handle non-OK status codes
+	if res.StatusCode != http.StatusOK {
+		return AccessControlPolicy{}, fmt.Errorf("status code: %s: %s", res.Status, string(body))
+	}
+
+	// Parse XML response
+	var policy AccessControlPolicy
+	if err := xml.Unmarshal(body, &policy); err != nil {
+		return AccessControlPolicy{}, err
+	}
+
+	return policy, nil
+}
