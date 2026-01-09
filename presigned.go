@@ -142,12 +142,7 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	for i, k := range sortedQS {
 		h.Write([]byte(awsURIEncode(k)))
 		h.Write([]byte{'='})
-		// X-Amz-SignedHeaders already has properly formatted semicolons, retain as is.
-		if k == HdrXAmzSignedHeaders {
-			h.Write([]byte(queryString[k]))
-		} else {
-			h.Write([]byte(awsURIEncode(queryString[k])))
-		}
+		h.Write([]byte(awsURIEncode(queryString[k])))
 		if i < len(sortedQS)-1 {
 			h.Write([]byte{'&'})
 		}
@@ -225,12 +220,7 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	for i, k := range sortedQS {
 		b.WriteString(awsURIEncode(k))
 		b.WriteRune('=')
-		// X-Amz-SignedHeaders already has properly formatted semicolons
-		if k == HdrXAmzSignedHeaders {
-			b.WriteString(queryString[k])
-		} else {
-			b.WriteString(awsURIEncode(queryString[k]))
-		}
+		b.WriteString(awsURIEncode(queryString[k]))
 		if i < len(sortedQS)-1 {
 			b.WriteRune('&')
 		}
@@ -293,6 +283,7 @@ func (s3 *S3) GeneratePresignedUploadPartURL(in PresignedMultipartInput) string 
 	}
 
 	// Add host to Headers
+	// AWS requires header names to be lowercase per spec
 	signedHeaders := map[string][]byte{
 		"host": []byte(hostname),
 	}
@@ -351,11 +342,7 @@ func (s3 *S3) GeneratePresignedUploadPartURL(in PresignedMultipartInput) string 
 		h.Write([]byte(awsURIEncode(k)))
 		h.Write([]byte{'='})
 		// X-Amz-SignedHeaders already has properly formatted semicolons, retain as is.
-		if k == HdrXAmzSignedHeaders {
-			h.Write([]byte(queryString[k]))
-		} else {
-			h.Write([]byte(awsURIEncode(queryString[k])))
-		}
+		h.Write([]byte(awsURIEncode(queryString[k])))
 		if i < len(sortedQS)-1 {
 			h.Write([]byte{'&'})
 		}
@@ -424,12 +411,7 @@ func (s3 *S3) GeneratePresignedUploadPartURL(in PresignedMultipartInput) string 
 	for i, k := range sortedQS {
 		b.WriteString(awsURIEncode(k))
 		b.WriteRune('=')
-		// X-Amz-SignedHeaders already has properly formatted semicolons
-		if k == HdrXAmzSignedHeaders {
-			b.WriteString(queryString[k])
-		} else {
-			b.WriteString(awsURIEncode(queryString[k]))
-		}
+		b.WriteString(awsURIEncode(queryString[k]))
 		if i < len(sortedQS)-1 {
 			b.WriteRune('&')
 		}
