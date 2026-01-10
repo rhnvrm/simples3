@@ -1,6 +1,9 @@
 package simples3
 
 import (
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -83,20 +86,105 @@ func TestS3_GeneratePresignedURL_ExtraHeader(t *testing.T) {
 			os.Getenv("AWS_S3_SECRET_KEY"),
 		)
 		s.Endpoint = os.Getenv("AWS_S3_ENDPOINT")
-		dontwant := ""
-		if got := s.GeneratePresignedURL(PresignedInput{
+		got := s.GeneratePresignedURL(PresignedInput{
 			Bucket:        os.Getenv("AWS_S3_BUCKET"),
 			ObjectKey:     "test2.txt",
 			Method:        "GET",
 			Timestamp:     nowTime(),
 			ExpirySeconds: 3600,
 			ExtraHeaders: map[string]string{
-				"x-amz-meta-test": "test",
+				"X-Amz-Meta-Test": "test",
+				"Content-Length":  "12345",
 			},
-		}); got == dontwant {
-			t.Errorf("S3.GeneratePresignedURL() = %v, dontwant %v", got, dontwant)
+		})
+		if got == "" {
+			t.Errorf("S3.GeneratePresignedURL() returned empty string")
+		}
+		wantSignedHeaders := "X-Amz-SignedHeaders=content-length%3Bhost%3Bx-amz-meta-test"
+		if !strings.Contains(got, wantSignedHeaders) {
+			t.Errorf("S3.GeneratePresignedURL() missing expected SignedHeaders format. Want to contain: %v, URL: %v", wantSignedHeaders, got)
 		}
 	})
+
+	t.Run("IntegrationTest", func(t *testing.T) {
+		// This test validates presigned URLs with extra signed headers against a real S3 service.
+		// MinIO doesn't fully support this feature, so the test will skip if MinIO is detected.
+		// Set TEST_REAL_S3=true to run this test (requires AWS S3 or Cloudflare R2).
+		if os.Getenv("TEST_REAL_S3") != "true" {
+			t.Skip("Skipping AWS S3 integration test. Set TEST_REAL_S3=true to run.")
+		}
+
+		// Skip if MinIO is detected (known limitation)
+		endpoint := os.Getenv("AWS_S3_ENDPOINT")
+		if strings.Contains(strings.ToLower(endpoint), "minio") || strings.Contains(strings.ToLower(endpoint), "localhost:9000") {
+			t.Skip("MinIO detected - presigned URLs with custom signed headers not supported")
+		}
+
+		s3 := New(
+			os.Getenv("AWS_S3_REGION"),
+			os.Getenv("AWS_S3_ACCESS_KEY"),
+			os.Getenv("AWS_S3_SECRET_KEY"),
+		)
+
+		// Set endpoint if provided (for Cloudflare R2, etc.)
+		if endpoint != "" {
+			s3.SetEndpoint(endpoint)
+		}
+
+		testContent := "test content for presigned URL"
+
+		headers := map[string]string{
+			"X-Amz-Meta-Test":   "testvalue",
+			"X-Amz-Meta-Author": "integration-test",
+			"Content-Length":    fmt.Sprintf("%d", len(testContent)),
+			"Content-Type":      "text/plain",
+		}
+
+		urlWithHeaders := s3.GeneratePresignedURL(PresignedInput{
+			Bucket:        os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey:     "presigned-upload-test-with-headers.txt",
+			Method:        "PUT",
+			Timestamp:     nowTime(),
+			ExpirySeconds: 3600,
+			ExtraHeaders:  headers,
+		})
+
+		req, _ := http.NewRequest("PUT", urlWithHeaders, strings.NewReader(testContent))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to PUT with extra headers: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 && resp.StatusCode != 204 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Presigned URL with extra headers failed with status %d. Body: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		readResp, err := s3.FileDownload(DownloadInput{
+			Bucket:    os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey: "presigned-upload-test-with-headers.txt",
+		})
+		if err != nil {
+			t.Fatalf("Failed to download uploaded object: %v", err)
+		}
+		defer readResp.Close()
+
+		readContent, _ := io.ReadAll(readResp)
+		if string(readContent) != testContent {
+			t.Fatalf("Content mismatch. Expected: %q, Got: %q", testContent, string(readContent))
+		}
+
+		defer s3.FileDelete(DeleteInput{
+			Bucket:    os.Getenv("AWS_S3_BUCKET"),
+			ObjectKey: "presigned-upload-test-with-headers.txt",
+		})
+	})
+
 }
 
 func TestS3_GeneratePresignedURL_PUT(t *testing.T) {
