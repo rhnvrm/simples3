@@ -80,7 +80,8 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 	// Add host to Headers
 	signedHeaders := map[string][]byte{}
 	for k, v := range in.ExtraHeaders {
-		signedHeaders[k] = []byte(v)
+		// AWS requires header names to be lowercase per spec
+		signedHeaders[strings.ToLower(k)] = []byte(v)
 	}
 	signedHeaders["host"] = []byte(hostname)
 
