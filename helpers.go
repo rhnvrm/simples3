@@ -17,15 +17,31 @@ import (
 // getURL constructs a URL for a given path, with multiple optional
 // arguments as individual subfolders, based on the endpoint
 // specified in s3 struct.
+//
+// For path-style (UsePathStyle=true, default):
+//   - With Endpoint: {Endpoint}/{bucket}/{key}
+//   - Without Endpoint: https://s3.{region}.amazonaws.com/{bucket}/{key}
+//
+// For virtual-hosted style (UsePathStyle=false):
+//   - With Endpoint: {Endpoint}/{key} (bucket should be in Endpoint)
+//   - Without Endpoint: https://{bucket}.s3.{region}.amazonaws.com/{key}
 func (s3 *S3) getURL(path string, args ...string) (uri string) {
 	if len(args) > 0 {
-		path += "/" + strings.Join(args, "/")
+		if path != "" {
+			path += "/" + strings.Join(args, "/")
+		} else {
+			path = strings.Join(args, "/")
+		}
 	}
 	// need to encode special characters in the path part of the URL
 	encodedPath := encodePath(path)
 
 	if len(s3.Endpoint) > 0 {
-		uri = s3.Endpoint + "/" + encodedPath
+		if encodedPath != "" {
+			uri = s3.Endpoint + "/" + encodedPath
+		} else {
+			uri = s3.Endpoint
+		}
 	} else {
 		uri = fmt.Sprintf(s3.URIFormat, s3.Region, encodedPath)
 	}

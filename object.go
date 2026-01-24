@@ -546,10 +546,10 @@ type copyObjectResult struct {
 // This operation is server-side, avoiding download/upload cycle.
 func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
 	// Validate required fields
-	if input.SourceBucket == "" || input.SourceKey == "" {
+	if (input.SourceBucket == "" && s3.UsePathStyle) || input.SourceKey == "" {
 		return CopyObjectOutput{}, fmt.Errorf("source bucket and key are required")
 	}
-	if input.DestBucket == "" || input.DestKey == "" {
+	if (input.DestBucket == "" && s3.UsePathStyle) || input.DestKey == "" {
 		return CopyObjectOutput{}, fmt.Errorf("destination bucket and key are required")
 	}
 
@@ -716,7 +716,7 @@ type deleteResult struct {
 // Returns both successful deletions and errors.
 func (s3 *S3) DeleteObjects(input DeleteObjectsInput) (DeleteObjectsOutput, error) {
 	// Validate required fields
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return DeleteObjectsOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if len(input.Objects) == 0 {
@@ -844,7 +844,7 @@ type PutObjectAclInput struct {
 // You can either use a CannedACL OR provide a full AccessControlPolicy.
 func (s3 *S3) PutObjectAcl(input PutObjectAclInput) error {
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -971,7 +971,7 @@ type GetObjectAclInput struct {
 // GetObjectAcl gets the Access Control List (ACL) for an object.
 func (s3 *S3) GetObjectAcl(input GetObjectAclInput) (AccessControlPolicy, error) {
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return AccessControlPolicy{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
