@@ -64,10 +64,6 @@ type DeleteBucketInput struct {
 // ListBuckets lists all S3 buckets for the AWS account.
 // It makes a GET request to the S3 service endpoint (not a specific bucket).
 func (s3 *S3) ListBuckets(input ListBucketsInput) (ListBucketsOutput, error) {
-	if !s3.UsePathStyle {
-		return ListBucketsOutput{}, fmt.Errorf("cannot be used with virtual-hosted style")
-	}
-
 	// Renew IAM token if needed
 	if err := s3.renewIAMToken(); err != nil {
 		return ListBucketsOutput{}, err
@@ -129,9 +125,6 @@ func (s3 *S3) ListBuckets(input ListBucketsInput) (ListBucketsOutput, error) {
 // For regions other than us-east-1, it sends a LocationConstraint in the request body.
 func (s3 *S3) CreateBucket(input CreateBucketInput) (CreateBucketOutput, error) {
 	// Validate input
-	if !s3.UsePathStyle {
-		return CreateBucketOutput{}, fmt.Errorf("cannot be used with virtual-hosted style")
-	}
 	if input.Bucket == "" {
 		return CreateBucketOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -207,9 +200,6 @@ func (s3 *S3) CreateBucket(input CreateBucketInput) (CreateBucketOutput, error) 
 // Returns an error if the bucket is not empty or does not exist.
 func (s3 *S3) DeleteBucket(input DeleteBucketInput) error {
 	// Validate input
-	if !s3.UsePathStyle {
-		return fmt.Errorf("cannot be used with virtual-hosted style")
-	}
 	if input.Bucket == "" {
 		return fmt.Errorf("bucket name is required")
 	}
