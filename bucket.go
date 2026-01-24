@@ -64,6 +64,10 @@ type DeleteBucketInput struct {
 // ListBuckets lists all S3 buckets for the AWS account.
 // It makes a GET request to the S3 service endpoint (not a specific bucket).
 func (s3 *S3) ListBuckets(input ListBucketsInput) (ListBucketsOutput, error) {
+	if !s3.UsePathStyle {
+		return ListBucketsOutput{}, fmt.Errorf("cannot be used with virtual-hosted style")
+	}
+
 	// Renew IAM token if needed
 	if err := s3.renewIAMToken(); err != nil {
 		return ListBucketsOutput{}, err
@@ -125,6 +129,9 @@ func (s3 *S3) ListBuckets(input ListBucketsInput) (ListBucketsOutput, error) {
 // For regions other than us-east-1, it sends a LocationConstraint in the request body.
 func (s3 *S3) CreateBucket(input CreateBucketInput) (CreateBucketOutput, error) {
 	// Validate input
+	if !s3.UsePathStyle {
+		return CreateBucketOutput{}, fmt.Errorf("cannot be used with virtual-hosted style")
+	}
 	if input.Bucket == "" {
 		return CreateBucketOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -200,6 +207,9 @@ func (s3 *S3) CreateBucket(input CreateBucketInput) (CreateBucketOutput, error) 
 // Returns an error if the bucket is not empty or does not exist.
 func (s3 *S3) DeleteBucket(input DeleteBucketInput) error {
 	// Validate input
+	if !s3.UsePathStyle {
+		return fmt.Errorf("cannot be used with virtual-hosted style")
+	}
 	if input.Bucket == "" {
 		return fmt.Errorf("bucket name is required")
 	}
@@ -286,7 +296,7 @@ type versioningConfigurationXML struct {
 // PutBucketVersioning sets the versioning configuration for a bucket.
 func (s3 *S3) PutBucketVersioning(input PutBucketVersioningInput) error {
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.Status != "Enabled" && input.Status != "Suspended" {
@@ -373,7 +383,7 @@ func (s3 *S3) PutBucketVersioning(input PutBucketVersioningInput) error {
 // GetBucketVersioning gets the versioning configuration for a bucket.
 func (s3 *S3) GetBucketVersioning(bucket string) (GetBucketVersioningOutput, error) {
 	// Validate input
-	if bucket == "" {
+	if bucket == "" && s3.UsePathStyle {
 		return GetBucketVersioningOutput{}, fmt.Errorf("bucket name is required")
 	}
 
@@ -485,7 +495,7 @@ type PutBucketAclInput struct {
 // You can either use a CannedACL OR provide a full AccessControlPolicy.
 func (s3 *S3) PutBucketAcl(input PutBucketAclInput) error {
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.CannedACL == "" && input.AccessControlPolicy == nil {
@@ -593,7 +603,7 @@ func (s3 *S3) PutBucketAcl(input PutBucketAclInput) error {
 // GetBucketAcl gets the Access Control List (ACL) for a bucket.
 func (s3 *S3) GetBucketAcl(bucket string) (AccessControlPolicy, error) {
 	// Validate input
-	if bucket == "" {
+	if bucket == "" && s3.UsePathStyle {
 		return AccessControlPolicy{}, fmt.Errorf("bucket name is required")
 	}
 
@@ -729,7 +739,7 @@ type PutBucketLifecycleInput struct {
 // PutBucketLifecycle sets the lifecycle configuration for a bucket.
 func (s3 *S3) PutBucketLifecycle(input PutBucketLifecycleInput) error {
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.Configuration == nil || len(input.Configuration.Rules) == 0 {
@@ -812,7 +822,7 @@ func (s3 *S3) PutBucketLifecycle(input PutBucketLifecycleInput) error {
 // GetBucketLifecycle gets the lifecycle configuration for a bucket.
 func (s3 *S3) GetBucketLifecycle(bucket string) (LifecycleConfiguration, error) {
 	// Validate input
-	if bucket == "" {
+	if bucket == "" && s3.UsePathStyle {
 		return LifecycleConfiguration{}, fmt.Errorf("bucket name is required")
 	}
 
@@ -884,7 +894,7 @@ func (s3 *S3) DeleteBucketLifecycle(input DeleteBucketInput) error {
 	// Reuse DeleteBucketInput since it just needs the bucket name
 
 	// Validate input
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 

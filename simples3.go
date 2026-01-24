@@ -26,11 +26,12 @@ type S3 struct {
 	Region    string
 	Client    *http.Client
 
-	Token     string
-	Endpoint  string
-	URIFormat string
-	initMode  string
-	expiry    time.Time
+	Token        string
+	Endpoint     string
+	URIFormat    string
+	UsePathStyle bool // Use path-style URLs (default: true)
+	initMode     string
+	expiry       time.Time
 
 	mu sync.Mutex
 }
@@ -42,7 +43,8 @@ func New(region, accessKey, secretKey string) *S3 {
 		AccessKey: accessKey,
 		SecretKey: secretKey,
 
-		URIFormat: "https://s3.%s.amazonaws.com/%s",
+		URIFormat:    "https://s3.%s.amazonaws.com/%s",
+		UsePathStyle: true,
 	}
 }
 
@@ -63,9 +65,7 @@ func (s3 *S3) SetEndpoint(uri string) *S3 {
 		}
 
 		// make sure there is no trailing slash
-		if uri[len(uri)-1] == '/' {
-			uri = uri[:len(uri)-1]
-		}
+		uri = strings.TrimRight(uri, "/")
 		s3.Endpoint = uri
 	}
 	return s3
@@ -89,6 +89,21 @@ func (s3 *S3) SetClient(client *http.Client) *S3 {
 	} else {
 		s3.Client = http.DefaultClient
 	}
+	return s3
+}
+
+// SetPathStyle enables path-style URLs (e.g., https://s3.region.amazonaws.com/bucket/key).
+// This is the default behavior.
+func (s3 *S3) SetPathStyle() *S3 {
+	s3.UsePathStyle = true
+	return s3
+}
+
+// SetVirtualHostedStyle enables virtual-hosted style URLs (e.g., https://bucket.s3.region.amazonaws.com/key).
+// When using virtual-hosted style, the bucket name should be included in the Endpoint,
+// and the Bucket parameter in API calls can be empty.
+func (s3 *S3) SetVirtualHostedStyle() *S3 {
+	s3.UsePathStyle = false
 	return s3
 }
 

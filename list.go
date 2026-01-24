@@ -89,7 +89,7 @@ func (e S3Error) Error() string {
 // List implements a simple S3 object listing API
 func (s3 *S3) List(input ListInput) (ListResponse, error) {
 	// Input validation
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return ListResponse{}, fmt.Errorf("bucket name cannot be empty")
 	}
 	if input.MaxKeys < 0 {
@@ -326,7 +326,7 @@ type ListVersionsResponse struct {
 // ListVersions lists object versions in a bucket.
 func (s3 *S3) ListVersions(input ListVersionsInput) (ListVersionsResponse, error) {
 	// Input validation
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return ListVersionsResponse{}, fmt.Errorf("bucket name cannot be empty")
 	}
 	if input.MaxKeys < 0 {

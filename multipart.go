@@ -59,7 +59,7 @@ type initiateMultipartUploadResult struct {
 
 // InitiateMultipartUpload initiates a multipart upload and returns an upload ID
 func (s3 *S3) InitiateMultipartUpload(input InitiateMultipartUploadInput) (InitiateMultipartUploadOutput, error) {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return InitiateMultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -155,7 +155,7 @@ type UploadPartOutput struct {
 
 // UploadPart uploads a single part for a multipart upload
 func (s3 *S3) UploadPart(input UploadPartInput) (UploadPartOutput, error) {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return UploadPartOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -342,7 +342,7 @@ type completeMultipartUploadResult struct {
 
 // CompleteMultipartUpload completes a multipart upload
 func (s3 *S3) CompleteMultipartUpload(input CompleteMultipartUploadInput) (CompleteMultipartUploadOutput, error) {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return CompleteMultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -444,7 +444,7 @@ type AbortMultipartUploadInput struct {
 
 // AbortMultipartUpload aborts a multipart upload and cleans up parts
 func (s3 *S3) AbortMultipartUpload(input AbortMultipartUploadInput) error {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -544,7 +544,7 @@ type partInfo struct {
 
 // ListParts lists the parts that have been uploaded for a multipart upload
 func (s3 *S3) ListParts(input ListPartsInput) (ListPartsOutput, error) {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return ListPartsOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -669,7 +669,7 @@ type MultipartUploadOutput struct {
 
 // FileUploadMultipart handles the entire multipart upload workflow
 func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOutput, error) {
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return MultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {

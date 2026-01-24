@@ -73,7 +73,7 @@ type DeleteObjectTaggingInput struct {
 // S3 allows up to 10 tags per object.
 func (s3 *S3) PutObjectTagging(input PutObjectTaggingInput) error {
 	// Validate required fields
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -174,7 +174,7 @@ func (s3 *S3) PutObjectTagging(input PutObjectTaggingInput) error {
 // GetObjectTagging retrieves the tags associated with an S3 object.
 func (s3 *S3) GetObjectTagging(input GetObjectTaggingInput) (GetObjectTaggingOutput, error) {
 	// Validate required fields
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return GetObjectTaggingOutput{}, fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
@@ -248,7 +248,7 @@ func (s3 *S3) GetObjectTagging(input GetObjectTaggingInput) (GetObjectTaggingOut
 // DeleteObjectTagging removes all tags from an S3 object.
 func (s3 *S3) DeleteObjectTagging(input DeleteObjectTaggingInput) error {
 	// Validate required fields
-	if input.Bucket == "" {
+	if input.Bucket == "" && s3.UsePathStyle {
 		return fmt.Errorf("bucket name is required")
 	}
 	if input.ObjectKey == "" {
