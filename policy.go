@@ -14,7 +14,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -70,7 +69,7 @@ var newLine = []byte{'\n'} //nolint
 func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, error) {
 	nowTime := nowTime()
 	credential := string(s3.buildCredential(nowTime))
-	data, err := buildUploadSign(nowTime, credential, uploadConfig)
+	data, err := buildUploadSign(nowTime, credential, uploadConfig, s3.Token)
 	if err != nil {
 		return UploadPolicies{}, err
 	}
@@ -84,7 +83,7 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 
 	uploadURL := uploadConfig.UploadURL
 	if uploadURL == "" {
-		uploadURL = fmt.Sprintf(defaultUploadURLFormat, uploadConfig.BucketName)
+		uploadURL = s3.resolveAddress(addressingSurfacePolicy, uploadConfig.BucketName).urlString()
 	}
 
 	// essential fields
@@ -96,6 +95,9 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 		"X-Amz-Date":       nowTime.Format(amzDateISO8601TimeFormat),
 		"Policy":           policy,
 		"X-Amz-Signature":  signature,
+	}
+	if s3.Token != "" {
+		form["X-Amz-Security-Token"] = s3.Token
 	}
 
 	// optional fields
@@ -116,7 +118,7 @@ func (s3 *S3) CreateUploadPolicies(uploadConfig UploadConfig) (UploadPolicies, e
 	}, nil
 }
 
-func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadConfig) ([]byte, error) {
+func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadConfig, token string) ([]byte, error) {
 	// essential conditions
 	conditions := []interface{}{
 		map[string]string{"bucket": uploadConfig.BucketName},
@@ -126,6 +128,9 @@ func buildUploadSign(nowTime time.Time, credential string, uploadConfig UploadCo
 		map[string]string{"x-amz-credential": credential},
 		map[string]string{"x-amz-algorithm": algorithm},
 		map[string]string{"x-amz-date": nowTime.Format(amzDateISO8601TimeFormat)},
+	}
+	if token != "" {
+		conditions = append(conditions, map[string]string{"x-amz-security-token": token})
 	}
 
 	// optional conditions
