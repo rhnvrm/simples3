@@ -26,11 +26,12 @@ type S3 struct {
 	Region    string
 	Client    *http.Client
 
-	Token     string
-	Endpoint  string
-	URIFormat string
-	initMode  string
-	expiry    time.Time
+	Token          string
+	Endpoint       string
+	URIFormat      string
+	addressingMode addressingMode
+	initMode       string
+	expiry         time.Time
 
 	mu sync.Mutex
 }
@@ -88,6 +89,20 @@ func (s3 *S3) SetClient(client *http.Client) *S3 {
 		s3.Client = client
 	} else {
 		s3.Client = http.DefaultClient
+	}
+	return s3
+}
+
+// SetUsePathStyle explicitly selects S3 bucket addressing style.
+//
+// When left unset, simples3 preserves its legacy surface-specific defaults:
+// runtime requests use path-style, while presigned URLs and direct upload
+// policy defaults retain their historical behavior.
+func (s3 *S3) SetUsePathStyle(use bool) *S3 {
+	if use {
+		s3.addressingMode = addressingModePath
+	} else {
+		s3.addressingMode = addressingModeVirtual
 	}
 	return s3
 }
