@@ -49,8 +49,14 @@ func (rt *runtime) run(args []string) int {
 		err = rt.runRemoveBucket(cmdArgs)
 	case "presign":
 		err = rt.runPresign(cmdArgs)
-	case "cp", "rm", "mv", "sync":
-		err = fmt.Errorf("%s is not implemented yet in this checkpoint", cmd)
+	case "cp":
+		err = rt.runCopy(cmdArgs)
+	case "rm":
+		err = rt.runRemove(cmdArgs)
+	case "mv":
+		err = rt.runMove(cmdArgs)
+	case "sync":
+		err = rt.runSync(cmdArgs)
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
@@ -76,10 +82,10 @@ Commands:
   mb       make bucket
   rb       remove bucket
   presign  generate a presigned object URL
-  cp       copy objects (planned)
-  rm       remove objects (planned)
-  mv       move objects (planned)
-  sync     synchronize source to destination (planned)
+  cp       copy local files and S3 objects
+  rm       remove S3 objects and prefixes
+  mv       move local files and S3 objects
+  sync     synchronize source to destination
 
 Run 'simples3 help' to see this message.
 `)

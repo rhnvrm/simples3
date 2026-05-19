@@ -28,6 +28,52 @@ using AWS Signature Version 4.
 go get github.com/rhnvrm/simples3
 ```
 
+## CLI
+
+A first-cut `simples3` CLI is available under `cmd/simples3`.
+
+### Build
+
+```sh
+go build ./cmd/simples3
+```
+
+### Auth and endpoint resolution
+
+The CLI resolves credentials and region from:
+1. explicit flags such as `--region` and `--endpoint`
+2. standard AWS environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `AWS_PROFILE`
+3. shared AWS config files (`~/.aws/credentials` and `~/.aws/config`)
+
+Custom S3-compatible endpoints such as MinIO can be passed with `--endpoint`.
+
+### Commands
+
+```text
+ls       list buckets or objects
+cp       copy local files and S3 objects
+rm       remove S3 objects and prefixes
+mb       make bucket
+rb       remove bucket
+mv       move local files and S3 objects
+presign  generate a presigned object URL
+sync     synchronize source to destination
+```
+
+### Examples
+
+```sh
+simples3 ls
+simples3 ls s3://my-bucket/prefix/
+simples3 cp ./notes.txt s3://my-bucket/docs/
+simples3 cp --recursive ./public s3://my-bucket/site/
+simples3 cp s3://my-bucket/archive/report.csv ./report.csv
+simples3 rm --recursive s3://my-bucket/tmp/
+simples3 mv s3://my-bucket/inbox/file.txt s3://my-bucket/archive/file.txt
+simples3 presign --expires 15m s3://my-bucket/path/file.txt
+simples3 sync --delete ./dist s3://my-bucket/site/
+```
+
 ## Quick Start
 
 ```go
