@@ -52,6 +52,7 @@ type operationResult struct {
 	Status      string `json:"status"`
 	Size        int64  `json:"size,omitempty"`
 	DryRun      bool   `json:"dryRun,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type targetMeta struct {
@@ -93,7 +94,7 @@ func collectLocalEntries(source location, recursive bool, matcher matcher) ([]so
 		}}, nil
 	}
 	if !recursive {
-		return nil, fmt.Errorf("%s is a directory; use --recursive", source.path)
+		return nil, usageErrorf("%s is a directory; use --recursive", source.path)
 	}
 
 	entries := []sourceEntry{}
@@ -135,7 +136,7 @@ func collectS3Entries(client *simples3.S3, source location, recursive bool, matc
 	prefixMode := recursive || source.key == ""
 	if prefixMode {
 		if versionID != "" {
-			return nil, fmt.Errorf("--version-id is only supported for a single source object")
+			return nil, usageErrorf("--version-id is only supported for a single source object")
 		}
 		prefix := s3TraversalPrefix(source, recursive)
 		entries := []sourceEntry{}
@@ -195,14 +196,14 @@ func s3TraversalPrefix(source location, recursive bool) string {
 
 func validateRecursiveSource(source location, recursive bool) error {
 	if source.isS3() && !recursive && (source.key == "" || source.hasTrailing) {
-		return fmt.Errorf("%s looks like an S3 prefix; use --recursive", source.String())
+		return usageErrorf("%s looks like an S3 prefix; use --recursive", source.String())
 	}
 	return nil
 }
 
 func ensureSingleSourceEntry(source location, recursive bool, entries []sourceEntry) error {
 	if !recursive && len(entries) > 1 {
-		return fmt.Errorf("%s expands to multiple objects; use --recursive", source.String())
+		return usageErrorf("%s expands to multiple objects; use --recursive", source.String())
 	}
 	return nil
 }

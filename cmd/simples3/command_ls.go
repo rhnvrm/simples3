@@ -8,7 +8,17 @@ import (
 	"github.com/rhnvrm/simples3"
 )
 
+type listSummary struct {
+	BucketCount       int `json:"bucketCount,omitempty"`
+	ObjectCount       int `json:"objectCount,omitempty"`
+	CommonPrefixCount int `json:"commonPrefixCount,omitempty"`
+}
+
 type listJSONOutput struct {
+	Command string            `json:"command"`
+	OK      bool              `json:"ok"`
+	Target  string            `json:"target,omitempty"`
+	Summary listSummary       `json:"summary"`
 	Buckets []simples3.Bucket `json:"buckets,omitempty"`
 	Prefix  string            `json:"prefix,omitempty"`
 	Objects []objectEntry     `json:"objects,omitempty"`
@@ -36,7 +46,7 @@ func (rt *runtime) runList(args []string) error {
 	remaining := fs.Args()
 	if len(remaining) > 1 {
 		fs.Usage()
-		return fmt.Errorf("ls accepts at most one target")
+		return usageErrorf("ls accepts at most one target")
 	}
 
 	settings, err := rt.resolveAWSSettings(flags)
@@ -51,7 +61,7 @@ func (rt *runtime) runList(args []string) error {
 			return err
 		}
 		if flags.json {
-			return writeJSON(rt.stdout, listJSONOutput{Buckets: result.Buckets})
+			return writeJSON(rt.stdout, listJSONOutput{Command: "ls", OK: true, Summary: listSummary{BucketCount: len(result.Buckets)}, Buckets: result.Buckets})
 		}
 		for _, bucket := range result.Buckets {
 			printLine(rt.stdout, "%s\t%s", bucket.CreationDate.Format(time.RFC3339), bucket.Name)
@@ -64,12 +74,12 @@ func (rt *runtime) runList(args []string) error {
 		return err
 	}
 	if !loc.isS3() {
-		return fmt.Errorf("ls target must be an s3:// URI")
+		return usageErrorf("ls target must be an s3:// URI")
 	}
 
 	if recursive {
 		seq, finish := client.ListAll(simples3.ListInput{Bucket: loc.bucket, Prefix: loc.s3Prefix()})
-		output := listJSONOutput{Prefix: loc.s3Prefix()}
+		output := listJSONOutput{Command: "ls", OK: true, Target: loc.String(), Prefix: loc.s3Prefix()}
 		for object := range seq {
 			entry := objectEntry{Key: object.Key, Size: object.Size, LastModified: object.LastModified, StorageClass: object.StorageClass}
 			if flags.json {
@@ -82,6 +92,7 @@ func (rt *runtime) runList(args []string) error {
 			return err
 		}
 		if flags.json {
+			output.Summary = listSummary{ObjectCount: len(output.Objects)}
 			return writeJSON(rt.stdout, output)
 		}
 		return nil
@@ -91,11 +102,12 @@ func (rt *runtime) runList(args []string) error {
 	if err != nil {
 		return err
 	}
-	output := listJSONOutput{Prefix: loc.s3Prefix(), Common: result.CommonPrefixes}
+	output := listJSONOutput{Command: "ls", OK: true, Target: loc.String(), Prefix: loc.s3Prefix(), Common: result.CommonPrefixes}
 	for _, object := range result.Objects {
 		output.Objects = append(output.Objects, objectEntry{Key: object.Key, Size: object.Size, LastModified: object.LastModified, StorageClass: object.StorageClass})
 	}
 	if flags.json {
+		output.Summary = listSummary{ObjectCount: len(output.Objects), CommonPrefixCount: len(output.Common)}
 		return writeJSON(rt.stdout, output)
 	}
 	for _, prefix := range output.Common {

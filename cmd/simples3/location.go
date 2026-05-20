@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -26,21 +25,21 @@ type location struct {
 
 func parseLocation(raw string) (location, error) {
 	if strings.TrimSpace(raw) == "" {
-		return location{}, fmt.Errorf("empty path")
+		return location{}, usageErrorf("empty path")
 	}
 	if strings.HasPrefix(raw, "s3://") {
 		parsed, err := url.Parse(raw)
 		if err != nil {
-			return location{}, err
+			return location{}, usageErrorf("invalid s3 location %q: %v", raw, err)
 		}
 		bucket := parsed.Host
 		if bucket == "" {
-			return location{}, fmt.Errorf("missing bucket in %q", raw)
+			return location{}, usageErrorf("missing bucket in %q", raw)
 		}
 		key := strings.TrimPrefix(parsed.EscapedPath(), "/")
 		decodedKey, err := url.PathUnescape(key)
 		if err != nil {
-			return location{}, err
+			return location{}, usageErrorf("invalid s3 key in %q: %v", raw, err)
 		}
 		return location{
 			kind:        locationKindS3,

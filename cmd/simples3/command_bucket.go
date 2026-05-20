@@ -7,6 +7,8 @@ import (
 )
 
 type bucketResult struct {
+	Command  string `json:"command"`
+	OK       bool   `json:"ok"`
 	Bucket   string `json:"bucket"`
 	Location string `json:"location,omitempty"`
 	Status   string `json:"status"`
@@ -23,14 +25,14 @@ func (rt *runtime) runMakeBucket(args []string) error {
 	}
 	if len(fs.Args()) != 1 {
 		fs.Usage()
-		return fmt.Errorf("mb requires exactly one bucket URI")
+		return usageErrorf("mb requires exactly one bucket URI")
 	}
 	loc, err := parseLocation(fs.Args()[0])
 	if err != nil {
 		return err
 	}
 	if !loc.isS3() || loc.bucket == "" || loc.key != "" {
-		return fmt.Errorf("mb target must be a bucket URI like s3://my-bucket")
+		return usageErrorf("mb target must be a bucket URI like s3://my-bucket")
 	}
 	settings, err := rt.resolveAWSSettings(flags)
 	if err != nil {
@@ -40,7 +42,7 @@ func (rt *runtime) runMakeBucket(args []string) error {
 	if err != nil {
 		return err
 	}
-	result := bucketResult{Bucket: loc.bucket, Location: output.Location, Status: "created"}
+	result := bucketResult{Command: "mb", OK: true, Bucket: loc.bucket, Location: output.Location, Status: "created"}
 	if flags.json {
 		return writeJSON(rt.stdout, result)
 	}
@@ -59,14 +61,14 @@ func (rt *runtime) runRemoveBucket(args []string) error {
 	}
 	if len(fs.Args()) != 1 {
 		fs.Usage()
-		return fmt.Errorf("rb requires exactly one bucket URI")
+		return usageErrorf("rb requires exactly one bucket URI")
 	}
 	loc, err := parseLocation(fs.Args()[0])
 	if err != nil {
 		return err
 	}
 	if !loc.isS3() || loc.bucket == "" || loc.key != "" {
-		return fmt.Errorf("rb target must be a bucket URI like s3://my-bucket")
+		return usageErrorf("rb target must be a bucket URI like s3://my-bucket")
 	}
 	settings, err := rt.resolveAWSSettings(flags)
 	if err != nil {
@@ -75,7 +77,7 @@ func (rt *runtime) runRemoveBucket(args []string) error {
 	if err := settings.newClient().DeleteBucket(simples3.DeleteBucketInput{Bucket: loc.bucket}); err != nil {
 		return err
 	}
-	result := bucketResult{Bucket: loc.bucket, Status: "deleted"}
+	result := bucketResult{Command: "rb", OK: true, Bucket: loc.bucket, Status: "deleted"}
 	if flags.json {
 		return writeJSON(rt.stdout, result)
 	}

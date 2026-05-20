@@ -52,7 +52,7 @@ Flags:
 		return err
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("sync requires a source and destination")
+		return usageErrorf("sync requires a source and destination")
 	}
 	flags.sse = normalizeSSE(flags.sse, flags.sseKMS)
 
@@ -65,10 +65,10 @@ Flags:
 		return err
 	}
 	if source.isLocal() && destination.isLocal() {
-		return fmt.Errorf("local-to-local sync is not supported")
+		return usageErrorf("local-to-local sync is not supported")
 	}
 	if destination.isLocal() && (flags.acl != "" || flags.sse != "" || flags.sseKMS != "") {
-		return fmt.Errorf("--acl/--sse flags require an S3 destination")
+		return usageErrorf("--acl/--sse flags require an S3 destination")
 	}
 
 	settings, err := rt.resolveAWSSettings(flags.awsFlags)
@@ -85,7 +85,7 @@ Flags:
 		return err
 	}
 	if flags.delete && !recursive {
-		return fmt.Errorf("--delete is only supported for recursive syncs")
+		return usageErrorf("--delete is only supported for recursive syncs")
 	}
 
 	entries, err := collectSourceEntries(client, source, recursive, matcher, "")
@@ -147,7 +147,7 @@ Flags:
 	}
 
 	if flags.json {
-		return writeJSON(rt.stdout, operationsOutput{Operations: results})
+		return writeOperationsJSON(rt.stdout, "sync", results)
 	}
 	return nil
 }

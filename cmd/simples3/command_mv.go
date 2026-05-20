@@ -39,7 +39,7 @@ Flags:
 		return err
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("mv requires a source and destination")
+		return usageErrorf("mv requires a source and destination")
 	}
 	flags.sse = normalizeSSE(flags.sse, flags.sseKMS)
 
@@ -52,13 +52,13 @@ Flags:
 		return err
 	}
 	if source.isLocal() && destination.isLocal() {
-		return fmt.Errorf("local-to-local moves are not supported")
+		return usageErrorf("local-to-local moves are not supported")
 	}
 	if source.String() == destination.String() {
-		return fmt.Errorf("source and destination are the same")
+		return usageErrorf("source and destination are the same")
 	}
 	if destination.isLocal() && (flags.acl != "" || flags.sse != "" || flags.sseKMS != "") {
-		return fmt.Errorf("--acl/--sse flags require an S3 destination")
+		return usageErrorf("--acl/--sse flags require an S3 destination")
 	}
 	if err := validateRecursiveSource(source, flags.recursive); err != nil {
 		return err
@@ -106,7 +106,7 @@ Flags:
 		}
 	}
 	if flags.json {
-		return writeJSON(rt.stdout, operationsOutput{Operations: results})
+		return writeOperationsJSON(rt.stdout, "mv", results)
 	}
 	return nil
 }

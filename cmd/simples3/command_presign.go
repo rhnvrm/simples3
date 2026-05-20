@@ -9,6 +9,8 @@ import (
 )
 
 type presignResult struct {
+	Command string `json:"command"`
+	OK      bool   `json:"ok"`
 	Target  string `json:"target"`
 	Method  string `json:"method"`
 	Expires string `json:"expires"`
@@ -32,14 +34,14 @@ func (rt *runtime) runPresign(args []string) error {
 	}
 	if len(fs.Args()) != 1 {
 		fs.Usage()
-		return fmt.Errorf("presign requires exactly one object URI")
+		return usageErrorf("presign requires exactly one object URI")
 	}
 	loc, err := parseLocation(fs.Args()[0])
 	if err != nil {
 		return err
 	}
 	if !loc.isS3() || loc.key == "" {
-		return fmt.Errorf("presign target must be an object URI like s3://bucket/key")
+		return usageErrorf("presign target must be an object URI like s3://bucket/key")
 	}
 	settings, err := rt.resolveAWSSettings(flags)
 	if err != nil {
@@ -47,21 +49,21 @@ func (rt *runtime) runPresign(args []string) error {
 	}
 	method = strings.ToUpper(method)
 	if method != "GET" && method != "PUT" {
-		return fmt.Errorf("unsupported presign method %q", method)
+		return usageErrorf("unsupported presign method %q", method)
 	}
 	duration, err := time.ParseDuration(expires)
 	if err != nil {
-		return err
+		return usageErrorf("invalid --expires value %q: %v", expires, err)
 	}
 	seconds := int(duration.Seconds())
 	if seconds <= 0 {
-		return fmt.Errorf("expires must be greater than zero")
+		return usageErrorf("expires must be greater than zero")
 	}
 	url := settings.newClient().GeneratePresignedURL(simples3.PresignedInput{Bucket: loc.bucket, ObjectKey: loc.key, Method: method, ExpirySeconds: seconds, ResponseContentDisposition: disposition})
 	if url == "" {
 		return fmt.Errorf("failed to generate presigned URL")
 	}
-	result := presignResult{Target: loc.String(), Method: method, Expires: duration.String(), URL: url}
+	result := presignResult{Command: "presign", OK: true, Target: loc.String(), Method: method, Expires: duration.String(), URL: url}
 	if flags.json {
 		return writeJSON(rt.stdout, result)
 	}

@@ -44,7 +44,7 @@ Flags:
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("rm requires exactly one S3 path")
+		return usageErrorf("rm requires exactly one S3 path")
 	}
 
 	target, err := parseLocation(fs.Arg(0))
@@ -52,16 +52,16 @@ Flags:
 		return err
 	}
 	if target.isLocal() {
-		return fmt.Errorf("rm only supports s3:// locations")
+		return usageErrorf("rm only supports s3:// locations")
 	}
 	if !flags.recursive && target.key == "" {
-		return fmt.Errorf("refusing to remove bucket root; use rb for buckets or --recursive for object prefixes")
+		return usageErrorf("refusing to remove bucket root; use rb for buckets or --recursive for object prefixes")
 	}
 	if flags.versionID != "" && flags.recursive {
-		return fmt.Errorf("--version-id is only supported for single-object deletes")
+		return usageErrorf("--version-id is only supported for single-object deletes")
 	}
 	if !flags.recursive && target.hasTrailing {
-		return fmt.Errorf("%s looks like a prefix; use --recursive", target.String())
+		return usageErrorf("%s looks like a prefix; use --recursive", target.String())
 	}
 
 	settings, err := rt.resolveAWSSettings(flags.awsFlags)
@@ -129,7 +129,7 @@ Flags:
 	}
 
 	if flags.json {
-		return writeJSON(rt.stdout, operationsOutput{Operations: results})
+		return writeOperationsJSON(rt.stdout, "rm", results)
 	}
 	return nil
 }

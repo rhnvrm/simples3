@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 )
 
 type runtime struct {
@@ -35,6 +37,7 @@ func (rt *runtime) run(args []string) int {
 
 	cmd := args[0]
 	cmdArgs := args[1:]
+	jsonMode := wantsJSON(cmdArgs)
 
 	var err error
 	switch cmd {
@@ -58,7 +61,7 @@ func (rt *runtime) run(args []string) int {
 	case "sync":
 		err = rt.runSync(cmdArgs)
 	default:
-		err = fmt.Errorf("unknown command %q", cmd)
+		err = usageErrorf("unknown command %q", cmd)
 	}
 
 	if err == nil {
@@ -67,8 +70,39 @@ func (rt *runtime) run(args []string) int {
 	if errors.Is(err, flagErrHelp) {
 		return 0
 	}
-	fmt.Fprintf(rt.stderr, "error: %v\n", err)
-	return 1
+	if jsonMode {
+		if encodeErr := writeJSON(rt.stdout, errorOutputForCommand(cmd, err)); encodeErr != nil {
+			fmt.Fprintf(rt.stderr, "error: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(rt.stderr, "error: %v\n", err)
+	}
+	return exitCodeForError(err)
+}
+
+func wantsJSON(args []string) bool {
+	jsonMode := false
+	for _, arg := range args {
+		switch {
+		case arg == "--":
+			return jsonMode
+		case arg == "-json" || arg == "--json":
+			jsonMode = true
+		case strings.HasPrefix(arg, "-json=") || strings.HasPrefix(arg, "--json="):
+			_, value, _ := strings.Cut(arg, "=")
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return true
+			}
+			jsonMode = parsed
+		case strings.HasPrefix(arg, "-"):
+			continue
+		default:
+			return jsonMode
+		}
+	}
+	return jsonMode
 }
 
 func (rt *runtime) printUsage() {

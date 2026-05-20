@@ -46,8 +46,12 @@ func TestRunListBucketsJSON(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("unexpected exit code %d, stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "bucket-one") {
-		t.Fatalf("expected bucket output, got %s", stdout.String())
+	output := stdout.String()
+	if !strings.Contains(output, "bucket-one") {
+		t.Fatalf("expected bucket output, got %s", output)
+	}
+	if !strings.Contains(output, `"command": "ls"`) || !strings.Contains(output, `"ok": true`) {
+		t.Fatalf("expected JSON envelope fields, got %s", output)
 	}
 }
 
@@ -340,6 +344,70 @@ func TestRunSyncUploadsAndDeletes(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synced ") || !strings.Contains(stdout.String(), "deleted s3://example-bucket/prefix/stale.txt") {
 		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+}
+
+func TestRunCopyDryRunJSONIncludesSummary(t *testing.T) {
+	sourceFile := filepath.Join(t.TempDir(), "upload.txt")
+	if err := os.WriteFile(sourceFile, []byte("hello upload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"cp", "--dry-run", "--json", sourceFile, "s3://example-bucket/uploads/"})
+	if code != 0 {
+		t.Fatalf("unexpected exit code %d, stderr=%s", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"command": "cp"`) || !strings.Contains(output, `"dryRun": true`) || !strings.Contains(output, `"changed": 1`) {
+		t.Fatalf("unexpected JSON output: %s", output)
+	}
+}
+
+func TestRunJSONUsageErrorIncludesExitCode(t *testing.T) {
+	rt, stdout, stderr := newTestRuntime(t, nil)
+	code := rt.run([]string{"cp", "--json", filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")})
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d (stderr=%s)", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr in JSON mode, got %s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"ok": false`) || !strings.Contains(output, `"type": "usage"`) || !strings.Contains(output, `"exitCode": 2`) {
+		t.Fatalf("unexpected JSON error output: %s", output)
+	}
+}
+
+func TestRunSingleDashJSONUsageErrorIncludesExitCode(t *testing.T) {
+	rt, stdout, stderr := newTestRuntime(t, nil)
+	code := rt.run([]string{"cp", "-json", filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")})
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d (stderr=%s)", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr in JSON mode, got %s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"ok": false`) || !strings.Contains(output, `"type": "usage"`) || !strings.Contains(output, `"exitCode": 2`) {
+		t.Fatalf("unexpected JSON error output: %s", output)
+	}
+}
+
+func TestRunTextUsageErrorReturnsExitCodeTwo(t *testing.T) {
+	rt, stdout, stderr := newTestRuntime(t, nil)
+	code := rt.run([]string{"cp", filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")})
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "local-to-local copies are not supported") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 }
 

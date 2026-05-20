@@ -33,7 +33,7 @@ func parseFlagSet(fs *flag.FlagSet, args []string) error {
 			fs.Usage()
 			return flagErrHelp
 		}
-		return err
+		return usageErrorf("%v", err)
 	}
 	return nil
 }
