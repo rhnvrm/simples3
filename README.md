@@ -821,7 +821,7 @@ The library includes comprehensive tests that run against a local MinIO instance
 # Run all tests (without MinIO)
 just test
 
-# Run tests with local MinIO
+# Run tests with local MinIO (includes CLI integration tests)
 just test-local
 
 # Run specific test
@@ -855,7 +855,7 @@ export AWS_S3_BUCKET="testbucket"
 
 ## Contributing
 
-Contributions welcome! Check [ROADMAP.md](ROADMAP.md) for planned features. Please add tests and ensure `just test-local` passes before submitting PRs.
+Contributions welcome! Check [ROADMAP.md](ROADMAP.md) for planned features. Please add tests and ensure `just test-local` passes before submitting PRs. That MinIO-backed run now includes the `cmd/simples3` CLI integration harness in addition to the library tests.
 
 ## Author
 

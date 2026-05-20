@@ -3,6 +3,10 @@
 # Variables
 MINIO_CONTAINER_NAME := "simples3-minio"
 MINIO_DATA_DIR := ".minio-data"
+MINIO_ENDPOINT := "http://127.0.0.1:9000"
+MINIO_REGION := "us-east-1"
+MINIO_ACCESS_KEY := "minioadmin"
+MINIO_SECRET_KEY := "minioadmin"
 AWS_S3_BUCKET := "testbucket"
 
 # Default command - lists all available recipes
@@ -17,7 +21,7 @@ test:
 test-local: setup
     @echo "🧪 Running tests with local MinIO..."
     @sleep 2
-    @go test -v ./...
+    @AWS_S3_BUCKET={{AWS_S3_BUCKET}} AWS_S3_REGION={{MINIO_REGION}} AWS_REGION={{MINIO_REGION}} AWS_DEFAULT_REGION={{MINIO_REGION}} AWS_S3_ACCESS_KEY={{MINIO_ACCESS_KEY}} AWS_S3_SECRET_KEY={{MINIO_SECRET_KEY}} AWS_ACCESS_KEY_ID={{MINIO_ACCESS_KEY}} AWS_SECRET_ACCESS_KEY={{MINIO_SECRET_KEY}} AWS_S3_ENDPOINT={{MINIO_ENDPOINT}} AWS_EC2_METADATA_DISABLED=true SIMPLES3_CLI_INTEGRATION=1 go test -v ./...
 
 
 # --- Go Module Management ---
@@ -61,7 +65,11 @@ minio-reset: minio-clean minio-up
 setup: minio-up
     @echo "⚙️ Setting up development environment..."
     @sleep 3
-    @aws --endpoint-url http://127.0.0.1:9000/ s3 mb s3://{{AWS_S3_BUCKET}} || true
+    @if command -v aws >/dev/null 2>&1; then \
+        AWS_ACCESS_KEY_ID={{MINIO_ACCESS_KEY}} AWS_SECRET_ACCESS_KEY={{MINIO_SECRET_KEY}} AWS_DEFAULT_REGION={{MINIO_REGION}} aws --endpoint-url {{MINIO_ENDPOINT}} s3 mb s3://{{AWS_S3_BUCKET}} || true; \
+    else \
+        echo "ℹ️ aws CLI not installed; Go tests will bootstrap {{AWS_S3_BUCKET}} automatically"; \
+    fi
     @echo "✅ Development environment ready!"
 
 dev-env: setup
