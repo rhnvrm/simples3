@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rhnvrm/simples3"
@@ -61,11 +62,24 @@ type targetMeta struct {
 	ModTime time.Time
 }
 
+type executionOptions struct {
+	DryRun          bool
+	Concurrency     int
+	Retries         int
+	ContinueOnError bool
+}
+
 type copyOptions struct {
-	DryRun bool
-	ACL    string
-	SSE    string
-	SSEKMS string
+	executionOptions
+	EmitProgress bool
+	ACL          string
+	SSE          string
+	SSEKMS       string
+}
+
+type plannedOperation struct {
+	result operationResult
+	run    func() error
 }
 
 func collectSourceEntries(client *simples3.S3, source location, recursive bool, matcher matcher, versionID string) ([]sourceEntry, error) {
@@ -304,7 +318,9 @@ func uploadLocalToS3(client *simples3.S3, entry sourceEntry, target targetRef, o
 	defer file.Close()
 
 	if entry.Size >= multipartThreshold {
-		printLine(rt.stderr, "uploading %s (%d bytes, multipart)", entry.Local, entry.Size)
+		if options.EmitProgress {
+			printLine(rt.stderr, "uploading %s (%d bytes, multipart)", entry.Local, entry.Size)
+		}
 		_, err = client.FileUploadMultipart(simples3.MultipartUploadInput{
 			Bucket:               target.Bucket,
 			ObjectKey:            target.Key,
@@ -319,7 +335,9 @@ func uploadLocalToS3(client *simples3.S3, entry sourceEntry, target targetRef, o
 		return err
 	}
 
-	printLine(rt.stderr, "uploading %s (%d bytes)", entry.Local, entry.Size)
+	if options.EmitProgress {
+		printLine(rt.stderr, "uploading %s (%d bytes)", entry.Local, entry.Size)
+	}
 	_, err = client.FilePut(simples3.UploadInput{
 		Bucket:               target.Bucket,
 		ObjectKey:            target.Key,
@@ -489,4 +507,279 @@ func chunkKeys(entries []sourceEntry, size int) [][]sourceEntry {
 		chunks = append(chunks, entries[start:end])
 	}
 	return chunks
+}
+
+type deleteBatch struct {
+	entries []sourceEntry
+}
+
+func buildDeleteResult(entry sourceEntry, dryRun bool) operationResult {
+	result := operationResult{Action: "remove", Source: entrySourceString(entry), Status: "deleted", Size: entry.Size, DryRun: dryRun}
+	if dryRun {
+		result.Status = "would-delete"
+	}
+	return result
+}
+
+func executeDeleteBatches(client *simples3.S3, entries []sourceEntry, bucket string, options executionOptions) []operationResult {
+	if len(entries) == 0 {
+		return []operationResult{}
+	}
+	if options.DryRun {
+		results := make([]operationResult, len(entries))
+		for i, entry := range entries {
+			results[i] = buildDeleteResult(entry, true)
+		}
+		return results
+	}
+
+	batches := makeDeleteBatches(entries)
+	concurrency := options.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency == 1 {
+		results := make([]operationResult, 0, len(entries))
+		for _, batch := range batches {
+			batchResults, failed := runDeleteBatch(client, batch, bucket, options.Retries)
+			results = append(results, batchResults...)
+			if failed && !options.ContinueOnError {
+				break
+			}
+		}
+		return results
+	}
+
+	type batchResult struct {
+		index   int
+		results []operationResult
+		failed  bool
+	}
+	results := make([][]operationResult, len(batches))
+	started := make([]bool, len(batches))
+	resultCh := make(chan batchResult, concurrency)
+	var wg sync.WaitGroup
+	stopLaunching := false
+	next := 0
+	inFlight := 0
+	launch := func(index int) {
+		started[index] = true
+		inFlight++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			batchResults, failed := runDeleteBatch(client, batches[index], bucket, options.Retries)
+			resultCh <- batchResult{index: index, results: batchResults, failed: failed}
+		}()
+	}
+	for next < len(batches) && inFlight < concurrency {
+		launch(next)
+		next++
+	}
+	for inFlight > 0 {
+		completed := <-resultCh
+		results[completed.index] = completed.results
+		inFlight--
+		if completed.failed && !options.ContinueOnError {
+			stopLaunching = true
+		}
+		for !stopLaunching && next < len(batches) && inFlight < concurrency {
+			launch(next)
+			next++
+		}
+	}
+	wg.Wait()
+
+	flattened := make([]operationResult, 0, len(entries))
+	for i := 0; i < next; i++ {
+		if started[i] {
+			flattened = append(flattened, results[i]...)
+		}
+	}
+	return flattened
+}
+
+func makeDeleteBatches(entries []sourceEntry) []deleteBatch {
+	chunks := chunkKeys(entries, 1000)
+	batches := make([]deleteBatch, 0, len(chunks))
+	for _, chunk := range chunks {
+		batches = append(batches, deleteBatch{entries: chunk})
+	}
+	return batches
+}
+
+func runDeleteBatch(client *simples3.S3, batch deleteBatch, bucket string, retries int) ([]operationResult, bool) {
+	results := make([]operationResult, len(batch.entries))
+	keys := make([]string, 0, len(batch.entries))
+	for i, entry := range batch.entries {
+		results[i] = buildDeleteResult(entry, false)
+		keys = append(keys, entry.Key)
+	}
+
+	var output simples3.DeleteObjectsOutput
+	if err := retryOperation(retries, func() error {
+		var err error
+		output, err = client.DeleteObjects(simples3.DeleteObjectsInput{Bucket: bucket, Objects: keys, Quiet: true})
+		return err
+	}); err != nil {
+		for i := range results {
+			results[i].Status = "failed"
+			results[i].Error = err.Error()
+		}
+		return results, true
+	}
+
+	errorsByKey := make(map[string]simples3.DeleteError, len(output.Errors))
+	for _, deleteErr := range output.Errors {
+		errorsByKey[deleteErr.Key] = deleteErr
+	}
+	failed := false
+	for i, entry := range batch.entries {
+		if deleteErr, ok := errorsByKey[entry.Key]; ok {
+			results[i].Status = "failed"
+			results[i].Error = formatDeleteError(deleteErr)
+			failed = true
+		}
+	}
+	return results, failed
+}
+
+func formatDeleteError(deleteErr simples3.DeleteError) string {
+	switch {
+	case deleteErr.Code != "" && deleteErr.Message != "":
+		return deleteErr.Code + ": " + deleteErr.Message
+	case deleteErr.Message != "":
+		return deleteErr.Message
+	case deleteErr.Code != "":
+		return deleteErr.Code
+	default:
+		return "delete failed"
+	}
+}
+
+func executePlannedOperations(ops []plannedOperation, options executionOptions) []operationResult {
+	if len(ops) == 0 {
+		return []operationResult{}
+	}
+	if options.DryRun {
+		results := make([]operationResult, len(ops))
+		for i, op := range ops {
+			results[i] = op.result
+		}
+		return results
+	}
+	concurrency := options.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency == 1 {
+		results := make([]operationResult, 0, len(ops))
+		for _, op := range ops {
+			result := runPlannedOperation(op, options)
+			results = append(results, result)
+			if result.Error != "" && !options.ContinueOnError {
+				break
+			}
+		}
+		return results
+	}
+
+	type workResult struct {
+		index  int
+		result operationResult
+	}
+	results := make([]operationResult, len(ops))
+	started := make([]bool, len(ops))
+	resultCh := make(chan workResult, concurrency)
+	var wg sync.WaitGroup
+	stopLaunching := false
+	next := 0
+	inFlight := 0
+	launch := func(index int) {
+		started[index] = true
+		inFlight++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resultCh <- workResult{index: index, result: runPlannedOperation(ops[index], options)}
+		}()
+	}
+	for next < len(ops) && inFlight < concurrency {
+		launch(next)
+		next++
+	}
+	for inFlight > 0 {
+		completed := <-resultCh
+		results[completed.index] = completed.result
+		inFlight--
+		if completed.result.Error != "" && !options.ContinueOnError {
+			stopLaunching = true
+		}
+		for !stopLaunching && next < len(ops) && inFlight < concurrency {
+			launch(next)
+			next++
+		}
+	}
+	wg.Wait()
+
+	attempted := make([]operationResult, 0, next)
+	for i := 0; i < next; i++ {
+		if started[i] {
+			attempted = append(attempted, results[i])
+		}
+	}
+	return attempted
+}
+
+func runPlannedOperation(op plannedOperation, options executionOptions) operationResult {
+	result := op.result
+	if op.run == nil {
+		return result
+	}
+	if err := retryOperation(options.Retries, op.run); err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+	}
+	return result
+}
+
+func retryOperation(retries int, fn func() error) error {
+	attempts := retries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == attempts || !isRetriableError(err) {
+			break
+		}
+		time.Sleep(time.Duration(attempt*attempt) * 100 * time.Millisecond)
+	}
+	return lastErr
+}
+
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, token := range []string{"timeout", "temporary", "connection reset", "connection refused", "unexpected eof", "no such host", "503", "502", "500", "504", "slow down", "internalerror"} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func operationsPartialFailure(command string, results []operationResult) error {
+	if !hasFailures(results) {
+		return nil
+	}
+	failed := summarizeOperations(results).Failed
+	return partialFailureError(fmt.Sprintf("%s completed with %d failed operation(s)", command, failed), buildOperationsData(results))
 }

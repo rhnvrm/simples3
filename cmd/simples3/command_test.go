@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,13 @@ func newTestRuntime(t *testing.T, env map[string]string) (*runtime, *bytes.Buffe
 		homeDir: func() (string, error) { return t.TempDir(), nil },
 	}
 	return rt, stdout, stderr
+}
+
+func decodeJSON(t *testing.T, data string, target any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(data), target); err != nil {
+		t.Fatalf("failed to decode JSON %s: %v", data, err)
+	}
 }
 
 func TestRunListBucketsJSON(t *testing.T) {
@@ -234,6 +242,39 @@ func TestRunRemoveRecursiveDryRun(t *testing.T) {
 		t.Fatalf("expected one list request, got %d", requestCount)
 	}
 	if !strings.Contains(stdout.String(), "would-delete s3://example-bucket/prefix/one.txt") {
+		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+}
+
+func TestRunRemoveSingleObjectRetriesTransientFailure(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/example-bucket/object.txt" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("temporary failure"))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"rm", "--retries", "1", "--endpoint", server.URL, "s3://example-bucket/object.txt"})
+	if code != 0 {
+		t.Fatalf("unexpected exit code %d, stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 delete attempts, got %d", attempts)
+	}
+	if !strings.Contains(stdout.String(), "deleted s3://example-bucket/object.txt") {
 		t.Fatalf("unexpected output: %s", stdout.String())
 	}
 }
@@ -453,5 +494,239 @@ func TestRunSyncUpdatesS3TargetWhenOnlyModTimeDiffers(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "synced ") {
 		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+}
+
+func TestRunCopyRetriesTransientUploadFailure(t *testing.T) {
+	sourceFile := filepath.Join(t.TempDir(), "retry.txt")
+	if err := os.WriteFile(sourceFile, []byte("retry me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/example-bucket/uploads/retry.txt" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("temporary failure"))
+			return
+		}
+		w.Header().Set("ETag", "etag")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"cp", "--retries", "1", "--endpoint", server.URL, sourceFile, "s3://example-bucket/uploads/"})
+	if code != 0 {
+		t.Fatalf("unexpected exit code %d, stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+	if !strings.Contains(stdout.String(), "copied ") {
+		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+}
+
+func TestRunCopyContinueOnErrorJSONReturnsPartialFailure(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "bad.txt"), []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "ok.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.URL.Path {
+		case "/example-bucket/prefix/bad.txt":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("boom"))
+		case "/example-bucket/prefix/ok.txt":
+			w.Header().Set("ETag", "etag")
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"cp", "--recursive", "--continue-on-error", "--retries", "0", "--json", "--endpoint", server.URL, sourceDir, "s3://example-bucket/prefix/"})
+	if code != 3 {
+		t.Fatalf("expected exit code 3, got %d (stdout=%s stderr=%s)", code, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %s", stderr.String())
+	}
+	var output struct {
+		Command string             `json:"command"`
+		OK      bool               `json:"ok"`
+		Error   commandErrorDetail `json:"error"`
+		Data    operationsData     `json:"data"`
+	}
+	decodeJSON(t, stdout.String(), &output)
+	if output.Command != "cp" || output.OK {
+		t.Fatalf("unexpected partial failure envelope: %+v", output)
+	}
+	if output.Error.Type != string(cliErrorPartial) || output.Error.ExitCode != 3 {
+		t.Fatalf("unexpected error detail: %+v", output.Error)
+	}
+	if output.Data.Summary.Changed != 1 || output.Data.Summary.Failed != 1 || output.Data.Summary.Total != 2 {
+		t.Fatalf("unexpected summary: %+v", output.Data.Summary)
+	}
+	if len(output.Data.Operations) != 2 {
+		t.Fatalf("expected 2 operations, got %d", len(output.Data.Operations))
+	}
+	if output.Data.Operations[0].Status != "failed" || output.Data.Operations[0].Error == "" {
+		t.Fatalf("expected first operation to fail with details, got %+v", output.Data.Operations[0])
+	}
+	if output.Data.Operations[1].Status != "copied" {
+		t.Fatalf("expected second operation to succeed, got %+v", output.Data.Operations[1])
+	}
+}
+
+func TestRunSyncPlanJSONIncludesUnchangedEntries(t *testing.T) {
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "same.txt")
+	if err := os.WriteFile(sourcePath, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourceTime := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(sourcePath, sourceTime, sourceTime); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/example-bucket/prefix/same.txt" {
+			w.Header().Set("Content-Length", "4")
+			w.Header().Set("Last-Modified", sourceTime.Format(http.TimeFormat))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"sync", "--plan", "--json", "--endpoint", server.URL, sourceDir, "s3://example-bucket/prefix/"})
+	if code != 0 {
+		t.Fatalf("unexpected exit code %d, stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var output operationsOutput
+	decodeJSON(t, stdout.String(), &output)
+	if output.Command != "sync" || !output.OK {
+		t.Fatalf("unexpected output: %+v", output)
+	}
+	if output.Summary.Total != 1 || output.Summary.Unchanged != 1 || !output.Summary.Noop || !output.Summary.DryRun {
+		t.Fatalf("unexpected summary: %+v", output.Summary)
+	}
+	if len(output.Operations) != 1 || output.Operations[0].Status != "unchanged" {
+		t.Fatalf("unexpected operations: %+v", output.Operations)
+	}
+}
+
+func TestRunRemoveRecursiveContinueOnErrorJSONReturnsPartialFailure(t *testing.T) {
+	deleteRequests := 0
+	var deleteBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2":
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <Name>example-bucket</Name>
+  <IsTruncated>false</IsTruncated>
+  <KeyCount>2</KeyCount>
+  <Contents>
+    <Key>prefix/fail.txt</Key>
+    <LastModified>2026-01-02T03:04:05Z</LastModified>
+    <ETag>etag</ETag>
+    <Size>4</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <Contents>
+    <Key>prefix/ok.txt</Key>
+    <LastModified>2026-01-02T03:04:05Z</LastModified>
+    <ETag>etag</ETag>
+    <Size>2</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+</ListBucketResult>`))
+		case r.Method == http.MethodPost && r.URL.RawQuery == "delete":
+			deleteRequests++
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deleteBody = string(payload)
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<DeleteResult>
+  <Deleted><Key>prefix/ok.txt</Key></Deleted>
+  <Error><Key>prefix/fail.txt</Key><Code>InternalError</Code><Message>delete failed</Message></Error>
+</DeleteResult>`))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access",
+		"AWS_SECRET_ACCESS_KEY": "test-secret",
+	})
+	code := rt.run([]string{"rm", "--recursive", "--continue-on-error", "--retries", "0", "--json", "--endpoint", server.URL, "s3://example-bucket/prefix/"})
+	if code != 3 {
+		t.Fatalf("expected exit code 3, got %d (stdout=%s stderr=%s)", code, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %s", stderr.String())
+	}
+	if deleteRequests != 1 {
+		t.Fatalf("expected one batched delete request, got %d", deleteRequests)
+	}
+	if !strings.Contains(deleteBody, "<Key>prefix/fail.txt</Key>") || !strings.Contains(deleteBody, "<Key>prefix/ok.txt</Key>") {
+		t.Fatalf("unexpected delete body: %s", deleteBody)
+	}
+	var output struct {
+		Command string             `json:"command"`
+		OK      bool               `json:"ok"`
+		Error   commandErrorDetail `json:"error"`
+		Data    operationsData     `json:"data"`
+	}
+	decodeJSON(t, stdout.String(), &output)
+	if output.Command != "rm" || output.OK {
+		t.Fatalf("unexpected partial failure envelope: %+v", output)
+	}
+	if output.Data.Summary.Deleted != 1 || output.Data.Summary.Failed != 1 || output.Data.Summary.Total != 2 {
+		t.Fatalf("unexpected summary: %+v", output.Data.Summary)
+	}
+	if len(output.Data.Operations) != 2 {
+		t.Fatalf("expected 2 operations, got %d", len(output.Data.Operations))
+	}
+	if output.Data.Operations[0].Status != "failed" || output.Data.Operations[1].Status != "deleted" {
+		t.Fatalf("unexpected operations: %+v", output.Data.Operations)
+	}
+	if output.Data.Operations[0].Error != "InternalError: delete failed" {
+		t.Fatalf("unexpected failure detail: %+v", output.Data.Operations[0])
 	}
 }

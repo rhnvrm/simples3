@@ -1,18 +1,17 @@
 package main
 
-import (
-	"fmt"
-
-	"github.com/rhnvrm/simples3"
-)
+import "fmt"
 
 type removeFlags struct {
 	awsFlags
-	recursive bool
-	dryRun    bool
-	includes  stringListFlag
-	excludes  stringListFlag
-	versionID string
+	recursive       bool
+	dryRun          bool
+	continueOnError bool
+	concurrency     int
+	retries         int
+	includes        stringListFlag
+	excludes        stringListFlag
+	versionID       string
 }
 
 func (rt *runtime) runRemove(args []string) error {
@@ -25,6 +24,9 @@ Remove an S3 object or prefix.
 Flags:
   --recursive           remove prefixes recursively
   --dry-run             print planned deletions without executing them
+  --continue-on-error   keep processing remaining deletions after failures
+  --concurrency <n>     number of deletions to run in parallel (default 1)
+  --retries <n>         retry transient failures this many times (default 2)
   --include <pattern>   include glob pattern for recursive deletes (repeatable)
   --exclude <pattern>   exclude glob pattern for recursive deletes (repeatable)
   --version-id <id>     delete a specific object version
@@ -37,6 +39,9 @@ Flags:
 	addAWSFlags(fs, &flags.awsFlags)
 	fs.BoolVar(&flags.recursive, "recursive", false, "remove recursively")
 	fs.BoolVar(&flags.dryRun, "dry-run", false, "print deletions without executing")
+	fs.BoolVar(&flags.continueOnError, "continue-on-error", false, "continue processing after failures")
+	fs.IntVar(&flags.concurrency, "concurrency", 1, "number of parallel deletions")
+	fs.IntVar(&flags.retries, "retries", 2, "number of retries for transient failures")
 	fs.Var(&flags.includes, "include", "include glob pattern")
 	fs.Var(&flags.excludes, "exclude", "exclude glob pattern")
 	fs.StringVar(&flags.versionID, "version-id", "", "object version ID")
@@ -64,6 +69,13 @@ Flags:
 		return usageErrorf("%s looks like a prefix; use --recursive", target.String())
 	}
 
+	if flags.concurrency < 1 {
+		return usageErrorf("--concurrency must be at least 1")
+	}
+	if flags.retries < 0 {
+		return usageErrorf("--retries cannot be negative")
+	}
+
 	settings, err := rt.resolveAWSSettings(flags.awsFlags)
 	if err != nil {
 		return err
@@ -74,60 +86,31 @@ Flags:
 	}
 	client := settings.newClient()
 
+	execution := executionOptions{DryRun: flags.dryRun, Concurrency: flags.concurrency, Retries: flags.retries, ContinueOnError: flags.continueOnError}
 	results := []operationResult{}
 	if flags.recursive {
 		entries, err := collectSourceEntries(client, target, true, matcher, "")
 		if err != nil {
 			return err
 		}
-		results = make([]operationResult, 0, len(entries))
-		for _, entry := range entries {
-			result := operationResult{Action: "remove", Source: entrySourceString(entry), Status: "deleted", Size: entry.Size}
-			if flags.dryRun {
-				result.Status = "would-delete"
-				result.DryRun = true
-				results = append(results, result)
-				if !flags.json {
-					printOperation(rt.stdout, result)
-				}
-				continue
-			}
-			results = append(results, result)
-		}
-		if !flags.dryRun {
-			for _, chunk := range chunkKeys(entries, 1000) {
-				keys := make([]string, 0, len(chunk))
-				for _, entry := range chunk {
-					keys = append(keys, entry.Key)
-				}
-				output, err := client.DeleteObjects(simples3.DeleteObjectsInput{Bucket: target.bucket, Objects: keys, Quiet: true})
-				if err != nil {
-					return err
-				}
-				if len(output.Errors) > 0 {
-					return fmt.Errorf("delete failed for %s: %s", output.Errors[0].Key, output.Errors[0].Message)
-				}
-			}
-			if !flags.json {
-				for _, result := range results {
-					printOperation(rt.stdout, result)
-				}
-			}
-		}
+		results = executeDeleteBatches(client, entries, target.bucket, execution)
 	} else {
 		entry := sourceEntry{Kind: locationKindS3, Bucket: target.bucket, Key: target.key, Version: flags.versionID, Relative: target.key}
-		result := operationResult{Action: "remove", Source: entrySourceString(entry), Status: "deleted", DryRun: flags.dryRun}
-		if flags.dryRun {
-			result.Status = "would-delete"
-		} else if err := client.FileDelete(simples3.DeleteInput{Bucket: target.bucket, ObjectKey: target.key, VersionId: flags.versionID}); err != nil {
-			return err
-		}
-		results = append(results, result)
-		if !flags.json {
-			printOperation(rt.stdout, result)
-		}
+		ops := []plannedOperation{{
+			result: buildDeleteResult(entry, flags.dryRun),
+			run: func() error {
+				return deleteSourceEntry(client, entry, target)
+			},
+		}}
+		results = executePlannedOperations(ops, execution)
 	}
 
+	if !flags.json {
+		printOperations(rt.stdout, results)
+	}
+	if err := operationsPartialFailure("rm", results); err != nil {
+		return err
+	}
 	if flags.json {
 		return writeOperationsJSON(rt.stdout, "rm", results)
 	}

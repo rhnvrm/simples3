@@ -83,7 +83,8 @@ func (rt *runtime) run(args []string) int {
 
 func wantsJSON(args []string) bool {
 	jsonMode := false
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch {
 		case arg == "--":
 			return jsonMode
@@ -97,12 +98,37 @@ func wantsJSON(args []string) bool {
 			}
 			jsonMode = parsed
 		case strings.HasPrefix(arg, "-"):
-			continue
+			name, _, hasInlineValue := strings.Cut(arg, "=")
+			if expectsFlagValue(name) && !hasInlineValue && i+1 < len(args) {
+				i++
+			}
 		default:
 			return jsonMode
 		}
 	}
 	return jsonMode
+}
+
+func expectsFlagValue(name string) bool {
+	switch name {
+	case "-profile", "--profile",
+		"-region", "--region",
+		"-endpoint", "--endpoint",
+		"-include", "--include",
+		"-exclude", "--exclude",
+		"-acl", "--acl",
+		"-sse", "--sse",
+		"-sse-kms-key-id", "--sse-kms-key-id",
+		"-version-id", "--version-id",
+		"-method", "--method",
+		"-expires", "--expires",
+		"-response-content-disposition", "--response-content-disposition",
+		"-concurrency", "--concurrency",
+		"-retries", "--retries":
+		return true
+	default:
+		return false
+	}
 }
 
 func (rt *runtime) printUsage() {

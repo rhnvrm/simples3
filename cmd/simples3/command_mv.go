@@ -18,6 +18,9 @@ Flags:
   --dry-run             print planned operations without executing them
   --include <pattern>   include glob pattern (repeatable)
   --exclude <pattern>   exclude glob pattern (repeatable)
+  --continue-on-error   keep processing remaining operations after failures
+  --concurrency <n>     number of operations to run in parallel (default 1)
+  --retries <n>         retry transient failures this many times (default 2)
   --acl <value>         canned ACL for uploads to S3
   --sse <value>         server-side encryption mode for S3 destinations
   --sse-kms-key-id <id> KMS key ID when using aws:kms
@@ -32,6 +35,9 @@ Flags:
 	fs.BoolVar(&flags.dryRun, "dry-run", false, "print operations without executing")
 	fs.Var(&flags.includes, "include", "include glob pattern")
 	fs.Var(&flags.excludes, "exclude", "exclude glob pattern")
+	fs.BoolVar(&flags.continueOnError, "continue-on-error", false, "continue processing after failures")
+	fs.IntVar(&flags.concurrency, "concurrency", 1, "number of parallel operations")
+	fs.IntVar(&flags.retries, "retries", 2, "number of retries for transient failures")
 	fs.StringVar(&flags.acl, "acl", "", "canned ACL for uploads")
 	fs.StringVar(&flags.sse, "sse", "", "server-side encryption mode")
 	fs.StringVar(&flags.sseKMS, "sse-kms-key-id", "", "KMS key ID")
@@ -64,6 +70,13 @@ Flags:
 		return err
 	}
 
+	if flags.concurrency < 1 {
+		return usageErrorf("--concurrency must be at least 1")
+	}
+	if flags.retries < 0 {
+		return usageErrorf("--retries cannot be negative")
+	}
+
 	settings, err := rt.resolveAWSSettings(flags.awsFlags)
 	if err != nil {
 		return err
@@ -81,29 +94,38 @@ Flags:
 		return err
 	}
 
-	results := make([]operationResult, 0, len(entries))
-	options := copyOptions{DryRun: flags.dryRun, ACL: flags.acl, SSE: flags.sse, SSEKMS: flags.sseKMS}
+	ops := make([]plannedOperation, 0, len(entries))
+	options := copyOptions{
+		executionOptions: executionOptions{DryRun: flags.dryRun, Concurrency: flags.concurrency, Retries: flags.retries, ContinueOnError: flags.continueOnError},
+		EmitProgress:     !flags.json,
+		ACL:              flags.acl,
+		SSE:              flags.sse,
+		SSEKMS:           flags.sseKMS,
+	}
 	for _, entry := range entries {
 		target, err := resolveTarget(entry, destination, flags.recursive)
 		if err != nil {
 			return err
 		}
-		status := "moved"
+		result := operationResult{Action: "move", Source: entrySourceString(entry), Destination: targetString(target), Status: "moved", Size: entry.Size, DryRun: flags.dryRun}
 		if flags.dryRun {
-			status = "would-move"
-		} else {
-			if err := copyEntry(client, entry, target, options, rt); err != nil {
+			result.Status = "would-move"
+		}
+		entryCopy := entry
+		targetCopy := target
+		ops = append(ops, plannedOperation{result: result, run: func() error {
+			if err := copyEntry(client, entryCopy, targetCopy, options, rt); err != nil {
 				return err
 			}
-			if err := deleteSourceEntry(client, entry, source); err != nil {
-				return err
-			}
-		}
-		result := operationResult{Action: "move", Source: entrySourceString(entry), Destination: targetString(target), Status: status, Size: entry.Size, DryRun: flags.dryRun}
-		results = append(results, result)
-		if !flags.json {
-			printOperation(rt.stdout, result)
-		}
+			return deleteSourceEntry(client, entryCopy, source)
+		}})
+	}
+	results := executePlannedOperations(ops, options.executionOptions)
+	if !flags.json {
+		printOperations(rt.stdout, results)
+	}
+	if err := operationsPartialFailure("mv", results); err != nil {
+		return err
 	}
 	if flags.json {
 		return writeOperationsJSON(rt.stdout, "mv", results)

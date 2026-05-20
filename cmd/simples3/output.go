@@ -35,10 +35,14 @@ type operationSummary struct {
 	Noop      bool `json:"noop,omitempty"`
 }
 
-type operationsOutput struct {
-	commandEnvelope
+type operationsData struct {
 	Summary    operationSummary  `json:"summary"`
 	Operations []operationResult `json:"operations"`
+}
+
+type operationsOutput struct {
+	commandEnvelope
+	operationsData
 }
 
 func writeJSON(out io.Writer, value any) error {
@@ -52,18 +56,31 @@ func printLine(out io.Writer, format string, args ...any) {
 }
 
 func printOperation(out io.Writer, result operationResult) {
+	suffix := ""
+	if result.Error != "" {
+		suffix = " (" + result.Error + ")"
+	}
 	if result.Destination != "" {
-		printLine(out, "%s %s -> %s", result.Status, result.Source, result.Destination)
+		printLine(out, "%s %s -> %s%s", result.Status, result.Source, result.Destination, suffix)
 		return
 	}
-	printLine(out, "%s %s", result.Status, result.Source)
+	printLine(out, "%s %s%s", result.Status, result.Source, suffix)
+}
+
+func printOperations(out io.Writer, results []operationResult) {
+	for _, result := range results {
+		printOperation(out, result)
+	}
+}
+
+func buildOperationsData(results []operationResult) operationsData {
+	return operationsData{Summary: summarizeOperations(results), Operations: results}
 }
 
 func writeOperationsJSON(out io.Writer, command string, results []operationResult) error {
 	return writeJSON(out, operationsOutput{
 		commandEnvelope: commandEnvelope{Command: command, OK: true},
-		Summary:         summarizeOperations(results),
-		Operations:      results,
+		operationsData:  buildOperationsData(results),
 	})
 }
 
@@ -102,4 +119,13 @@ func isFailureStatus(status string) bool {
 
 func isUnchangedStatus(status string) bool {
 	return status == "unchanged"
+}
+
+func hasFailures(results []operationResult) bool {
+	for _, result := range results {
+		if isFailureStatus(result.Status) {
+			return true
+		}
+	}
+	return false
 }
