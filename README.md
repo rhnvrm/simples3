@@ -28,6 +28,180 @@ using AWS Signature Version 4.
 go get github.com/rhnvrm/simples3
 ```
 
+## CLI
+
+A first-cut `simples3` CLI is available under `cmd/simples3`.
+
+### Build
+
+```sh
+go build ./cmd/simples3
+```
+
+### Auth and endpoint resolution
+
+The CLI resolves credentials and region from:
+1. explicit flags such as `--region` and `--endpoint`
+2. standard AWS environment variables like `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `AWS_PROFILE`
+3. shared AWS config files (`~/.aws/credentials` and `~/.aws/config`)
+
+Custom S3-compatible endpoints such as MinIO can be passed with `--endpoint`.
+
+### Machine contract
+
+- Default text output is for humans and may change.
+- `--json` is the stable automation path. JSON success and error payloads are written to stdout.
+- Exit codes:
+  - `0` success
+  - `1` runtime failure
+  - `2` usage or validation failure
+  - `3` partial failure for bulk commands when `--continue-on-error` is used
+- JSON errors use this envelope:
+
+```json
+{
+  "command": "cp",
+  "ok": false,
+  "error": {
+    "type": "usage",
+    "message": "source and destination are required",
+    "exitCode": 2
+  }
+}
+```
+
+Bulk commands (`cp`, `mv`, `rm`, `sync`) return per-operation JSON with a summary:
+
+```json
+{
+  "command": "sync",
+  "ok": true,
+  "summary": {
+    "total": 3,
+    "changed": 1,
+    "deleted": 1,
+    "unchanged": 1,
+    "dryRun": true,
+    "noop": false
+  },
+  "operations": [
+    {
+      "action": "sync",
+      "source": "./dist/app.js",
+      "destination": "s3://my-bucket/site/app.js",
+      "status": "would-sync"
+    }
+  ]
+}
+```
+
+### Commands
+
+```text
+ls          list buckets or objects
+cp          copy local files and S3 objects
+rm          remove S3 objects and prefixes
+mb          make bucket
+rb          remove bucket
+mv          move local files and S3 objects
+presign     generate a presigned object URL
+sync        synchronize source to destination
+tags        get, set, or delete object tags
+versioning  get or set bucket versioning
+versions    list object versions and delete markers
+lifecycle   get, set, or delete bucket lifecycle configuration
+acl         get or set bucket or object ACLs
+```
+
+### Transfer and sync flags
+
+`cp`, `mv`, `rm`, and `sync` share these automation-oriented flags:
+
+- `--dry-run`
+- `--continue-on-error`
+- `--concurrency <n>`
+- `--retries <n>`
+- `--include <pattern>` / `--exclude <pattern>` where applicable
+
+`sync --plan` implies `--dry-run` and includes unchanged entries in JSON output.
+
+`sync --delete` is only allowed for recursive syncs.
+
+`rm` has a few safety guards:
+- `simples3 rm s3://bucket` is refused; use `rb` for buckets
+- prefix-like targets require `--recursive`
+- `--version-id` is only valid for single-object deletes
+
+### Metadata and lifecycle inputs
+
+- `tags set` accepts repeatable `--tag key=value` flags or `--tags-file PATH|-` with a JSON object map.
+- `lifecycle set` accepts `--file PATH|-` with lower-camel JSON.
+- `acl set` accepts either `--acl <canned-acl>` or `--policy-file PATH|-`.
+
+Lifecycle document example:
+
+```json
+{
+  "rules": [
+    {
+      "id": "expire-logs",
+      "status": "Enabled",
+      "filter": {
+        "prefix": "logs/"
+      },
+      "expiration": {
+        "days": 30
+      }
+    }
+  ]
+}
+```
+
+ACL policy example:
+
+```json
+{
+  "owner": {
+    "id": "owner-id",
+    "displayName": "owner"
+  },
+  "grants": [
+    {
+      "grantee": {
+        "type": "CanonicalUser",
+        "id": "owner-id",
+        "displayName": "owner"
+      },
+      "permission": "FULL_CONTROL"
+    }
+  ]
+}
+```
+
+### Examples
+
+```sh
+simples3 ls
+simples3 ls s3://my-bucket/prefix/
+simples3 cp ./notes.txt s3://my-bucket/docs/
+simples3 cp --recursive ./public s3://my-bucket/site/
+simples3 cp --json --continue-on-error --concurrency 4 ./batch s3://my-bucket/inbox/
+simples3 cp s3://my-bucket/archive/report.csv ./report.csv
+simples3 rm --recursive s3://my-bucket/tmp/
+simples3 rm --json --continue-on-error s3://my-bucket/tmp/
+simples3 mv s3://my-bucket/inbox/file.txt s3://my-bucket/archive/file.txt
+simples3 presign --expires 15m s3://my-bucket/path/file.txt
+simples3 sync --plan --json ./dist s3://my-bucket/site/
+simples3 sync --delete ./dist s3://my-bucket/site/
+simples3 tags set --tag env=prod --tag team=platform s3://my-bucket/path/file.txt
+simples3 tags get --json s3://my-bucket/path/file.txt
+simples3 versioning set --status enabled s3://my-bucket
+simples3 versions --json s3://my-bucket/path/file.txt
+simples3 lifecycle set --file lifecycle.json s3://my-bucket
+simples3 acl get --json s3://my-bucket
+simples3 acl set --policy-file acl.json s3://my-bucket
+```
+
 ## Quick Start
 
 ```go
@@ -775,7 +949,7 @@ The library includes comprehensive tests that run against a local MinIO instance
 # Run all tests (without MinIO)
 just test
 
-# Run tests with local MinIO
+# Run tests with local MinIO (includes CLI integration tests)
 just test-local
 
 # Run specific test
@@ -809,7 +983,7 @@ export AWS_S3_BUCKET="testbucket"
 
 ## Contributing
 
-Contributions welcome! Check [ROADMAP.md](ROADMAP.md) for planned features. Please add tests and ensure `just test-local` passes before submitting PRs.
+Contributions welcome! Check [ROADMAP.md](ROADMAP.md) for planned features. Please add tests and ensure `just test-local` passes before submitting PRs. That MinIO-backed run now includes the `cmd/simples3` CLI integration harness in addition to the library tests.
 
 ## Author
 
