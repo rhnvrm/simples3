@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -74,21 +75,47 @@ func newCLIIntegrationHarness(t *testing.T) *cliIntegrationHarness {
 
 func (h *cliIntegrationHarness) cleanupBucket() {
 	h.t.Helper()
-	seq, finish := h.client.ListAll(simples3.ListInput{Bucket: h.bucket})
-	keys := make([]string, 0)
-	for object := range seq {
-		keys = append(keys, object.Key)
-	}
-	if err := finish(); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
-		h.t.Fatalf("list cleanup bucket %s: %v", h.bucket, err)
-	}
-	for start := 0; start < len(keys); start += 1000 {
-		end := start + 1000
-		if end > len(keys) {
-			end = len(keys)
+	for attempt := 0; attempt < 5; attempt++ {
+		removed := false
+		versions, err := h.client.ListVersions(simples3.ListVersionsInput{Bucket: h.bucket})
+		if err == nil {
+			for _, version := range versions.Versions {
+				removed = true
+				if err := h.client.FileDelete(simples3.DeleteInput{Bucket: h.bucket, ObjectKey: version.Key, VersionId: version.VersionId}); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+					h.t.Fatalf("delete cleanup object version %s from %s: %v", version.Key, h.bucket, err)
+				}
+			}
+			for _, marker := range versions.DeleteMarkers {
+				removed = true
+				if err := h.client.FileDelete(simples3.DeleteInput{Bucket: h.bucket, ObjectKey: marker.Key, VersionId: marker.VersionId}); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+					h.t.Fatalf("delete cleanup delete-marker %s from %s: %v", marker.Key, h.bucket, err)
+				}
+			}
 		}
-		if _, err := h.client.DeleteObjects(simples3.DeleteObjectsInput{Bucket: h.bucket, Objects: keys[start:end], Quiet: true}); err != nil {
-			h.t.Fatalf("delete cleanup objects from %s: %v", h.bucket, err)
+
+		seq, finish := h.client.ListAll(simples3.ListInput{Bucket: h.bucket})
+		keys := make([]string, 0)
+		for object := range seq {
+			keys = append(keys, object.Key)
+		}
+		if err := finish(); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+			h.t.Fatalf("list cleanup bucket %s: %v", h.bucket, err)
+		}
+		if len(keys) == 0 && !removed {
+			break
+		}
+		for start := 0; start < len(keys); start += 1000 {
+			removed = true
+			end := start + 1000
+			if end > len(keys) {
+				end = len(keys)
+			}
+			if _, err := h.client.DeleteObjects(simples3.DeleteObjectsInput{Bucket: h.bucket, Objects: keys[start:end], Quiet: true}); err != nil {
+				h.t.Fatalf("delete cleanup objects from %s: %v", h.bucket, err)
+			}
+		}
+		if !removed {
+			break
 		}
 	}
 	if err := h.client.DeleteBucket(simples3.DeleteBucketInput{Bucket: h.bucket}); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
@@ -97,10 +124,15 @@ func (h *cliIntegrationHarness) cleanupBucket() {
 }
 
 func (h *cliIntegrationHarness) run(args ...string) (int, string, string) {
+	return h.runWithInput("", args...)
+}
+
+func (h *cliIntegrationHarness) runWithInput(input string, args ...string) (int, string, string) {
 	h.t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	rt := &runtime{
+		stdin:  strings.NewReader(input),
 		stdout: stdout,
 		stderr: stderr,
 		getenv: func(key string) string { return h.env[key] },
@@ -116,7 +148,16 @@ func (h *cliIntegrationHarness) mustRun(args ...string) string {
 	h.t.Helper()
 	code, stdout, stderr := h.run(args...)
 	if code != 0 {
-		h.t.Fatalf("command failed (%v): %s", args, stderr)
+		h.t.Fatalf("command failed (%v): stdout=%s stderr=%s", args, stdout, stderr)
+	}
+	return stdout
+}
+
+func (h *cliIntegrationHarness) mustRunWithInput(input string, args ...string) string {
+	h.t.Helper()
+	code, stdout, stderr := h.runWithInput(input, args...)
+	if code != 0 {
+		h.t.Fatalf("command failed (%v): stdout=%s stderr=%s", args, stdout, stderr)
 	}
 	return stdout
 }
@@ -273,5 +314,144 @@ func TestCLIIntegrationSyncAndPresign(t *testing.T) {
 	}
 	if string(body) != "presigned hello" {
 		t.Fatalf("unexpected presigned body: %q", string(body))
+	}
+}
+
+func TestCLIIntegrationTags(t *testing.T) {
+	h := newCLIIntegrationHarness(t)
+	objectURI := fmt.Sprintf("s3://%s/meta/tagged.txt", h.bucket)
+	h.putObject("meta/tagged.txt", "hello tags")
+
+	stdout := h.mustRun("tags", "set", "--json", "--tag", "env=test", "--tag", "team=platform", objectURI)
+	var setOutput tagsResult
+	decodeJSON(t, stdout, &setOutput)
+	if setOutput.Status != "updated" || setOutput.Tags["env"] != "test" || setOutput.Tags["team"] != "platform" {
+		t.Fatalf("unexpected tags set output: %+v", setOutput)
+	}
+
+	stdout = h.mustRun("tags", "get", "--json", objectURI)
+	var getOutput tagsResult
+	decodeJSON(t, stdout, &getOutput)
+	if getOutput.Status != "loaded" || len(getOutput.Tags) != 2 || getOutput.Tags["team"] != "platform" {
+		t.Fatalf("unexpected tags get output: %+v", getOutput)
+	}
+
+	stdout = h.mustRun("tags", "delete", "--json", objectURI)
+	var deleteOutput tagsResult
+	decodeJSON(t, stdout, &deleteOutput)
+	if deleteOutput.Status != "deleted" {
+		t.Fatalf("unexpected tags delete output: %+v", deleteOutput)
+	}
+
+	stdout = h.mustRun("tags", "get", "--json", objectURI)
+	var finalGetOutput tagsResult
+	decodeJSON(t, stdout, &finalGetOutput)
+	if len(finalGetOutput.Tags) != 0 {
+		t.Fatalf("expected tags to be empty after delete, got %+v", finalGetOutput.Tags)
+	}
+}
+
+func TestCLIIntegrationVersioningAndVersions(t *testing.T) {
+	h := newCLIIntegrationHarness(t)
+	bucketURI := fmt.Sprintf("s3://%s", h.bucket)
+	objectKey := "history/object.txt"
+	objectURI := fmt.Sprintf("s3://%s/%s", h.bucket, objectKey)
+
+	stdout := h.mustRun("versioning", "set", "--json", "--status", "enabled", bucketURI)
+	var setOutput versioningResult
+	decodeJSON(t, stdout, &setOutput)
+	if setOutput.Status != "Enabled" {
+		t.Fatalf("unexpected versioning set output: %+v", setOutput)
+	}
+
+	stdout = h.mustRun("versioning", "get", "--json", bucketURI)
+	var getOutput versioningResult
+	decodeJSON(t, stdout, &getOutput)
+	if getOutput.Status != "Enabled" {
+		t.Fatalf("unexpected versioning get output: %+v", getOutput)
+	}
+
+	h.putObject(objectKey, "v1")
+	time.Sleep(1100 * time.Millisecond)
+	h.putObject(objectKey, "v2")
+
+	stdout = h.mustRun("versions", "--json", objectURI)
+	var versionsOutput versionsResult
+	decodeJSON(t, stdout, &versionsOutput)
+	if versionsOutput.Bucket != h.bucket || len(versionsOutput.Versions) < 2 {
+		t.Fatalf("unexpected versions output: %+v", versionsOutput)
+	}
+	latestCount := 0
+	for _, version := range versionsOutput.Versions {
+		if version.IsLatest {
+			latestCount++
+		}
+	}
+	if latestCount != 1 {
+		t.Fatalf("expected exactly one latest version, got %d in %+v", latestCount, versionsOutput.Versions)
+	}
+}
+
+func TestCLIIntegrationLifecycleAndACL(t *testing.T) {
+	h := newCLIIntegrationHarness(t)
+	bucketURI := fmt.Sprintf("s3://%s", h.bucket)
+	objectURI := fmt.Sprintf("s3://%s/acl/object.txt", h.bucket)
+	lifecycleInput := `{"rules":[{"id":"expire-logs","status":"Enabled","filter":{"prefix":"logs/"},"expiration":{"days":30}}]}`
+
+	stdout := h.mustRunWithInput(lifecycleInput, "lifecycle", "set", "--json", "--file", "-", bucketURI)
+	var lifecycleSet lifecycleResult
+	decodeJSON(t, stdout, &lifecycleSet)
+	if lifecycleSet.Status != "updated" || lifecycleSet.Configuration == nil || len(lifecycleSet.Configuration.Rules) != 1 {
+		t.Fatalf("unexpected lifecycle set output: %+v", lifecycleSet)
+	}
+
+	stdout = h.mustRun("lifecycle", "get", "--json", bucketURI)
+	var lifecycleGet lifecycleResult
+	decodeJSON(t, stdout, &lifecycleGet)
+	if lifecycleGet.Status != "loaded" || lifecycleGet.Configuration == nil || len(lifecycleGet.Configuration.Rules) != 1 || lifecycleGet.Configuration.Rules[0].Filter == nil || lifecycleGet.Configuration.Rules[0].Filter.Prefix != "logs/" {
+		t.Fatalf("unexpected lifecycle get output: %+v", lifecycleGet)
+	}
+
+	stdout = h.mustRun("lifecycle", "delete", "--json", bucketURI)
+	var lifecycleDelete lifecycleResult
+	decodeJSON(t, stdout, &lifecycleDelete)
+	if lifecycleDelete.Status != "deleted" {
+		t.Fatalf("unexpected lifecycle delete output: %+v", lifecycleDelete)
+	}
+
+	h.putObject("acl/object.txt", "hello acl")
+	stdout = h.mustRun("acl", "get", "--json", bucketURI)
+	var aclGet aclResult
+	decodeJSON(t, stdout, &aclGet)
+	if aclGet.Status != "loaded" || aclGet.Policy == nil || len(aclGet.Policy.Grants) == 0 {
+		t.Fatalf("unexpected bucket acl get output: %+v", aclGet)
+	}
+
+	policyBytes, err := json.Marshal(aclGet.Policy)
+	if err != nil {
+		t.Fatalf("marshal ACL policy: %v", err)
+	}
+	policyFile := filepath.Join(t.TempDir(), "bucket-acl.json")
+	if err := os.WriteFile(policyFile, policyBytes, 0o644); err != nil {
+		t.Fatalf("write ACL policy file: %v", err)
+	}
+	code, stdout, stderr := h.run("acl", "set", "--json", "--policy-file", policyFile, bucketURI)
+	if code != 0 {
+		if strings.Contains(stdout, "501 Not Implemented") || strings.Contains(stderr, "501 Not Implemented") {
+			t.Skip("backend does not support ACL updates")
+		}
+		t.Fatalf("acl set failed: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var aclSet aclResult
+	decodeJSON(t, stdout, &aclSet)
+	if aclSet.Status != "updated" || aclSet.Policy == nil || len(aclSet.Policy.Grants) == 0 {
+		t.Fatalf("unexpected bucket acl set output: %+v", aclSet)
+	}
+
+	stdout = h.mustRun("acl", "get", "--json", objectURI)
+	var objectACL aclResult
+	decodeJSON(t, stdout, &objectACL)
+	if objectACL.Status != "loaded" || objectACL.Policy == nil || len(objectACL.Policy.Grants) == 0 {
+		t.Fatalf("unexpected object acl get output: %+v", objectACL)
 	}
 }

@@ -10,6 +10,7 @@ import (
 )
 
 type runtime struct {
+	stdin   io.Reader
 	stdout  io.Writer
 	stderr  io.Writer
 	getenv  func(string) string
@@ -18,6 +19,7 @@ type runtime struct {
 
 func newRuntime(stdout, stderr io.Writer) *runtime {
 	return &runtime{
+		stdin:   os.Stdin,
 		stdout:  stdout,
 		stderr:  stderr,
 		getenv:  os.Getenv,
@@ -60,6 +62,16 @@ func (rt *runtime) run(args []string) int {
 		err = rt.runMove(cmdArgs)
 	case "sync":
 		err = rt.runSync(cmdArgs)
+	case "tags":
+		err = rt.runTags(cmdArgs)
+	case "versioning":
+		err = rt.runVersioning(cmdArgs)
+	case "versions":
+		err = rt.runVersions(cmdArgs)
+	case "lifecycle":
+		err = rt.runLifecycle(cmdArgs)
+	case "acl":
+		err = rt.runACL(cmdArgs)
 	default:
 		err = usageErrorf("unknown command %q", cmd)
 	}
@@ -124,7 +136,17 @@ func expectsFlagValue(name string) bool {
 		"-expires", "--expires",
 		"-response-content-disposition", "--response-content-disposition",
 		"-concurrency", "--concurrency",
-		"-retries", "--retries":
+		"-retries", "--retries",
+		"-tag", "--tag",
+		"-tags-file", "--tags-file",
+		"-status", "--status",
+		"-mfa-delete", "--mfa-delete",
+		"-delimiter", "--delimiter",
+		"-max-keys", "--max-keys",
+		"-key-marker", "--key-marker",
+		"-version-id-marker", "--version-id-marker",
+		"-file", "--file",
+		"-policy-file", "--policy-file":
 		return true
 	default:
 		return false
@@ -138,14 +160,19 @@ Usage:
   simples3 <command> [flags] [arguments]
 
 Commands:
-  ls       list buckets or objects
-  mb       make bucket
-  rb       remove bucket
-  presign  generate a presigned object URL
-  cp       copy local files and S3 objects
-  rm       remove S3 objects and prefixes
-  mv       move local files and S3 objects
-  sync     synchronize source to destination
+  ls          list buckets or objects
+  mb          make bucket
+  rb          remove bucket
+  presign     generate a presigned object URL
+  cp          copy local files and S3 objects
+  rm          remove S3 objects and prefixes
+  mv          move local files and S3 objects
+  sync        synchronize source to destination
+  tags        get, set, or delete object tags
+  versioning  get or set bucket versioning
+  versions    list object versions and delete markers
+  lifecycle   get, set, or delete bucket lifecycle config
+  acl         get or set bucket or object ACLs
 
 Run 'simples3 help' to see this message.
 `)

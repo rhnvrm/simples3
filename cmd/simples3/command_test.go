@@ -18,6 +18,7 @@ func newTestRuntime(t *testing.T, env map[string]string) (*runtime, *bytes.Buffe
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	rt := &runtime{
+		stdin:   strings.NewReader(""),
 		stdout:  stdout,
 		stderr:  stderr,
 		getenv:  func(key string) string { return env[key] },
@@ -728,5 +729,316 @@ func TestRunRemoveRecursiveContinueOnErrorJSONReturnsPartialFailure(t *testing.T
 	}
 	if output.Data.Operations[0].Error != "InternalError: delete failed" {
 		t.Fatalf("unexpected failure detail: %+v", output.Data.Operations[0])
+	}
+}
+
+func TestRunTagsCommands(t *testing.T) {
+	var putBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/example-bucket/object.txt" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if _, ok := r.URL.Query()["tagging"]; !ok {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			putBody = string(payload)
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<Tagging>
+  <TagSet>
+    <Tag><Key>env</Key><Value>test</Value></Tag>
+    <Tag><Key>team</Key><Value>platform</Value></Tag>
+  </TagSet>
+</Tagging>`))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	tagsFile := filepath.Join(t.TempDir(), "tags.json")
+	if err := os.WriteFile(tagsFile, []byte(`{"env":"test","team":"platform"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"}
+	rt, stdout, stderr := newTestRuntime(t, env)
+	if code := rt.run([]string{"tags", "set", "--json", "--endpoint", server.URL, "--tags-file", tagsFile, "s3://example-bucket/object.txt"}); code != 0 {
+		t.Fatalf("tags set failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(putBody, "<Key>env</Key>") || !strings.Contains(putBody, "<Key>team</Key>") {
+		t.Fatalf("unexpected tagging PUT body: %s", putBody)
+	}
+	var setOutput tagsResult
+	decodeJSON(t, stdout.String(), &setOutput)
+	if setOutput.Status != "updated" || setOutput.Tags["env"] != "test" {
+		t.Fatalf("unexpected tags set output: %+v", setOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, env)
+	if code := rt.run([]string{"tags", "get", "--json", "--endpoint", server.URL, "s3://example-bucket/object.txt"}); code != 0 {
+		t.Fatalf("tags get failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var getOutput tagsResult
+	decodeJSON(t, stdout.String(), &getOutput)
+	if getOutput.Status != "loaded" || getOutput.Tags["team"] != "platform" {
+		t.Fatalf("unexpected tags get output: %+v", getOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, env)
+	if code := rt.run([]string{"tags", "delete", "--json", "--endpoint", server.URL, "s3://example-bucket/object.txt"}); code != 0 {
+		t.Fatalf("tags delete failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var deleteOutput tagsResult
+	decodeJSON(t, stdout.String(), &deleteOutput)
+	if deleteOutput.Status != "deleted" {
+		t.Fatalf("unexpected tags delete output: %+v", deleteOutput)
+	}
+}
+
+func TestRunVersioningCommands(t *testing.T) {
+	var putBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/example-bucket" || r.URL.RawQuery != "versioning" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			putBody = string(payload)
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<VersioningConfiguration>
+  <Status>Enabled</Status>
+</VersioningConfiguration>`))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	env := map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"}
+	rt, stdout, stderr := newTestRuntime(t, env)
+	if code := rt.run([]string{"versioning", "set", "--json", "--endpoint", server.URL, "--status", "enabled", "s3://example-bucket"}); code != 0 {
+		t.Fatalf("versioning set failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(putBody, "<Status>Enabled</Status>") {
+		t.Fatalf("unexpected versioning PUT body: %s", putBody)
+	}
+	var setOutput versioningResult
+	decodeJSON(t, stdout.String(), &setOutput)
+	if setOutput.Status != "Enabled" {
+		t.Fatalf("unexpected versioning set output: %+v", setOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, env)
+	if code := rt.run([]string{"versioning", "get", "--json", "--endpoint", server.URL, "s3://example-bucket"}); code != 0 {
+		t.Fatalf("versioning get failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var getOutput versioningResult
+	decodeJSON(t, stdout.String(), &getOutput)
+	if getOutput.Status != "Enabled" {
+		t.Fatalf("unexpected versioning get output: %+v", getOutput)
+	}
+}
+
+func TestRunVersionsJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if r.Method != http.MethodGet || r.URL.Path != "/example-bucket" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if _, ok := query["versions"]; !ok || query.Get("prefix") != "prefix/" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ListVersionsResult>
+  <Name>example-bucket</Name>
+  <Prefix>prefix/</Prefix>
+  <IsTruncated>false</IsTruncated>
+  <Version>
+    <Key>prefix/object.txt</Key>
+    <VersionId>v2</VersionId>
+    <IsLatest>true</IsLatest>
+    <LastModified>2026-01-02T03:04:05Z</LastModified>
+    <ETag>etag</ETag>
+    <Size>12</Size>
+    <StorageClass>STANDARD</StorageClass>
+    <Owner><ID>owner-id</ID><DisplayName>owner</DisplayName></Owner>
+  </Version>
+  <DeleteMarker>
+    <Key>prefix/object.txt</Key>
+    <VersionId>v1</VersionId>
+    <IsLatest>false</IsLatest>
+    <LastModified>2026-01-01T03:04:05Z</LastModified>
+    <Owner><ID>owner-id</ID><DisplayName>owner</DisplayName></Owner>
+  </DeleteMarker>
+</ListVersionsResult>`))
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"})
+	if code := rt.run([]string{"versions", "--json", "--endpoint", server.URL, "s3://example-bucket/prefix/"}); code != 0 {
+		t.Fatalf("versions failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var output versionsResult
+	decodeJSON(t, stdout.String(), &output)
+	if output.Bucket != "example-bucket" || len(output.Versions) != 1 || output.Versions[0].VersionID != "v2" || len(output.DeleteMarkers) != 1 {
+		t.Fatalf("unexpected versions output: %+v", output)
+	}
+}
+
+func TestRunLifecycleCommands(t *testing.T) {
+	var putBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/example-bucket" || r.URL.RawQuery != "lifecycle" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			putBody = string(payload)
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration>
+  <Rule>
+    <ID>expire</ID>
+    <Status>Enabled</Status>
+    <Expiration><Days>30</Days></Expiration>
+  </Rule>
+</LifecycleConfiguration>`))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	rt, stdout, stderr := newTestRuntime(t, map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"})
+	rt.stdin = strings.NewReader(`{"rules":[{"id":"expire","status":"Enabled","expiration":{"days":30}}]}`)
+	if code := rt.run([]string{"lifecycle", "set", "--json", "--endpoint", server.URL, "--file", "-", "s3://example-bucket"}); code != 0 {
+		t.Fatalf("lifecycle set failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(putBody, "<ID>expire</ID>") || !strings.Contains(putBody, "<Days>30</Days>") {
+		t.Fatalf("unexpected lifecycle PUT body: %s", putBody)
+	}
+	var setOutput lifecycleResult
+	decodeJSON(t, stdout.String(), &setOutput)
+	if setOutput.Status != "updated" || setOutput.Configuration == nil || len(setOutput.Configuration.Rules) != 1 || setOutput.Configuration.Rules[0].Expiration == nil || setOutput.Configuration.Rules[0].Expiration.Days != 30 {
+		t.Fatalf("unexpected lifecycle set output: %+v", setOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"})
+	if code := rt.run([]string{"lifecycle", "get", "--json", "--endpoint", server.URL, "s3://example-bucket"}); code != 0 {
+		t.Fatalf("lifecycle get failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var getOutput lifecycleResult
+	decodeJSON(t, stdout.String(), &getOutput)
+	if getOutput.Status != "loaded" || getOutput.Configuration == nil || len(getOutput.Configuration.Rules) != 1 || getOutput.Configuration.Rules[0].ID != "expire" {
+		t.Fatalf("unexpected lifecycle get output: %+v", getOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"})
+	if code := rt.run([]string{"lifecycle", "delete", "--json", "--endpoint", server.URL, "s3://example-bucket"}); code != 0 {
+		t.Fatalf("lifecycle delete failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var deleteOutput lifecycleResult
+	decodeJSON(t, stdout.String(), &deleteOutput)
+	if deleteOutput.Status != "deleted" {
+		t.Fatalf("unexpected lifecycle delete output: %+v", deleteOutput)
+	}
+}
+
+func TestRunACLCommands(t *testing.T) {
+	var putBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/example-bucket" || r.URL.RawQuery != "acl" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			putBody = string(payload)
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<AccessControlPolicy>
+  <Owner><ID>owner-id</ID><DisplayName>owner</DisplayName></Owner>
+  <AccessControlList>
+    <Grant>
+      <Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">
+        <ID>owner-id</ID>
+        <DisplayName>owner</DisplayName>
+      </Grantee>
+      <Permission>FULL_CONTROL</Permission>
+    </Grant>
+  </AccessControlList>
+</AccessControlPolicy>`))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	policyFile := filepath.Join(t.TempDir(), "acl.json")
+	policy := `{"owner":{"id":"owner-id","displayName":"owner"},"grants":[{"grantee":{"type":"CanonicalUser","id":"owner-id","displayName":"owner"},"permission":"FULL_CONTROL"}]}`
+	if err := os.WriteFile(policyFile, []byte(policy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"AWS_ACCESS_KEY_ID": "test-access", "AWS_SECRET_ACCESS_KEY": "test-secret"}
+	rt, stdout, stderr := newTestRuntime(t, env)
+	if code := rt.run([]string{"acl", "set", "--json", "--endpoint", server.URL, "--policy-file", policyFile, "s3://example-bucket"}); code != 0 {
+		t.Fatalf("acl set failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(putBody, "<Permission>FULL_CONTROL</Permission>") {
+		t.Fatalf("unexpected ACL PUT body: %s", putBody)
+	}
+	var setOutput aclResult
+	decodeJSON(t, stdout.String(), &setOutput)
+	if setOutput.Status != "updated" || setOutput.Policy == nil || len(setOutput.Policy.Grants) != 1 || setOutput.Policy.Owner.ID != "owner-id" {
+		t.Fatalf("unexpected acl set output: %+v", setOutput)
+	}
+
+	rt, stdout, stderr = newTestRuntime(t, env)
+	if code := rt.run([]string{"acl", "get", "--json", "--endpoint", server.URL, "s3://example-bucket"}); code != 0 {
+		t.Fatalf("acl get failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var getOutput aclResult
+	decodeJSON(t, stdout.String(), &getOutput)
+	if getOutput.Status != "loaded" || getOutput.Policy == nil || getOutput.Policy.Owner.ID != "owner-id" || len(getOutput.Policy.Grants) != 1 {
+		t.Fatalf("unexpected acl get output: %+v", getOutput)
 	}
 }
