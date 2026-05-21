@@ -5,6 +5,7 @@ package simples3
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,19 +14,25 @@ import (
 )
 
 const (
-	imdsTokenHeader                = "X-aws-ec2-metadata-token"
-	imdsTokenTtlHeader             = "X-aws-ec2-metadata-token-ttl-seconds"
-	metadataBaseURL                = "http://169.254.169.254/latest"
-	securityCredentialsURI         = "/meta-data/iam/security-credentials/"
-	imdsTokenURI                   = "/api/token"
-	defaultIMDSTokenTTL            = "60"
-	ecsContainerCredentialsEnv     = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
-	ecsContainerCredentialsBaseUrl = "http://169.254.170.2"
+	imdsTokenHeader            = "X-aws-ec2-metadata-token"
+	imdsTokenTtlHeader         = "X-aws-ec2-metadata-token-ttl-seconds"
+	metadataBaseURL            = "http://169.254.169.254/latest"
+	securityCredentialsURI     = "/meta-data/iam/security-credentials/"
+	imdsTokenURI               = "/api/token"
+	defaultIMDSTokenTTL        = "60"
+	ecsContainerCredentialsEnv = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
 )
+
+var ecsContainerCredentialsBaseURL = "http://169.254.170.2"
+
+var errECSCredentialsEndpointNotSet = errors.New("ecs credentials endpoint not set")
 
 // IAMResponse is used by NewUsingIAM to auto
 // detect the credentials.
 type IAMResponse struct {
+	Code            string    `json:"Code"`
+	LastUpdated     string    `json:"LastUpdated"`
+	Type            string    `json:"Type"`
 	AccessKeyID     string    `json:"AccessKeyId"`
 	SecretAccessKey string    `json:"SecretAccessKey"`
 	Token           string    `json:"Token"`
@@ -80,12 +87,11 @@ func fetchIMDSToken(cl *http.Client, baseURL string) (string, bool, error) {
 // fetchIAMDataECS fetches the IAM credentials from the ECS default endpoint.
 func fetchIAMDataForEcs(cl *http.Client) (IAMResponse, error) {
 	env, isSet := os.LookupEnv(ecsContainerCredentialsEnv)
-
 	if !isSet {
-		return IAMResponse{}, fmt.Errorf("error getting ecs environment variable, most likely not using ecs.")
+		return IAMResponse{}, errECSCredentialsEndpointNotSet
 	}
 
-	url := ecsContainerCredentialsBaseUrl + env
+	url := ecsContainerCredentialsBaseURL + env
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -95,6 +101,14 @@ func fetchIAMDataForEcs(cl *http.Client) (IAMResponse, error) {
 	resp, err := cl.Do(req)
 	if err != nil {
 		return IAMResponse{}, fmt.Errorf("error fetching IAM ECS request: %w", err)
+	}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return IAMResponse{}, fmt.Errorf("error fetching IAM ECS data: %s", resp.Status)
 	}
 
 	var jResp IAMResponse
@@ -120,6 +134,11 @@ func fetchIAMData(cl *http.Client, baseURL string) (IAMResponse, error) {
 	// If already have ECS response, skip the rest of the function and use it instead.
 	if err == nil {
 		return response, nil
+	}
+	// If ECS credentials are explicitly configured, do not fall back to IMDS.
+	// Falling back here can pick up the instance role instead of the task role.
+	if !errors.Is(err, errECSCredentialsEndpointNotSet) {
+		return IAMResponse{}, err
 	}
 
 	token, useIMDSv2, err := fetchIMDSToken(cl, baseURL)
