@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -119,8 +120,19 @@ func (s3 *S3) signRequest(req *http.Request) error {
 	// the hash of an empty string.
 
 	if req.Header.Get("x-amz-content-sha256") == "" {
-		emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-		req.Header.Set("x-amz-content-sha256", emptyhash)
+		if req.Body == nil {
+			emptyhash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+			req.Header.Set("x-amz-content-sha256", emptyhash)
+		} else {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return err
+			}
+
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			h := sha256.Sum256(body)
+			req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h))
+		}
 	}
 
 	k := s3.signKeys(t)
