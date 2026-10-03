@@ -2,13 +2,54 @@ package simples3
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+type limitedReadSeeker struct {
+	*bytes.Reader
+	maxRead int
+}
+
+func (r *limitedReadSeeker) Read(p []byte) (int, error) {
+	if len(p) > r.maxRead {
+		p = p[:r.maxRead]
+	}
+	return r.Reader.Read(p)
+}
+
+func TestFilePutHashesCompleteBodyWithShortReads(t *testing.T) {
+	content := []byte("body returned across multiple short reads")
+	wantHash := fmt.Sprintf("%x", sha256.Sum256(content))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read uploaded body: %v", err)
+		}
+		if gotHash := fmt.Sprintf("%x", sha256.Sum256(body)); gotHash != wantHash {
+			t.Errorf("uploaded body hash = %s, want %s", gotHash, wantHash)
+		}
+		if got := r.Header.Get("x-amz-content-sha256"); got != wantHash {
+			t.Errorf("x-amz-content-sha256 = %s, want %s", got, wantHash)
+		}
+		w.Header().Set("ETag", "test-etag")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	s3 := New("us-east-1", "access", "secret").SetEndpoint(server.URL)
+	body := &limitedReadSeeker{Reader: bytes.NewReader(content), maxRead: 2}
+	if _, err := s3.FilePut(UploadInput{Bucket: "bucket", ObjectKey: "key", Body: body}); err != nil {
+		t.Fatalf("FilePut returned an error: %v", err)
+	}
+}
 
 func TestS3_FileUploadPostAndPut(t *testing.T) {
 	testTxt, err := os.Open("testdata/test.txt")
