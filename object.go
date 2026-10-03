@@ -156,12 +156,16 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 		return PutResponse{}, err
 	}
 
-	content := make([]byte, fSize)
-	_, err = u.Body.Read(content)
-	if err != nil {
+	if _, err := u.Body.Seek(0, io.SeekStart); err != nil {
 		return PutResponse{}, err
 	}
-	u.Body.Seek(0, 0)
+	h := sha256.New()
+	if _, err := io.Copy(h, u.Body); err != nil {
+		return PutResponse{}, err
+	}
+	if _, err := u.Body.Seek(0, io.SeekStart); err != nil {
+		return PutResponse{}, err
+	}
 
 	req, er := http.NewRequest(http.MethodPut, s3.getURL(u.Bucket, u.ObjectKey), u.Body)
 	if er != nil {
@@ -172,8 +176,6 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 		u.ContentType = "application/octet-stream"
 	}
 
-	h := sha256.New()
-	h.Write(content)
 	req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h.Sum(nil)))
 
 	req.Header.Set("Content-Type", u.ContentType)
