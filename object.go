@@ -165,7 +165,7 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 
 	req, er := http.NewRequest(http.MethodPut, s3.getURL(u.Bucket, u.ObjectKey), u.Body)
 	if er != nil {
-		return PutResponse{}, err
+		return PutResponse{}, er
 	}
 
 	if u.ContentType == "" {

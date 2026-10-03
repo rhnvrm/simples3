@@ -10,6 +10,18 @@ import (
 	"time"
 )
 
+func TestFilePutReturnsRequestConstructionError(t *testing.T) {
+	s3 := New("us-east-1", "access", "secret").SetEndpoint("http://%")
+	_, err := s3.FilePut(UploadInput{
+		Bucket:    "bucket",
+		ObjectKey: "key",
+		Body:      bytes.NewReader([]byte("content")),
+	})
+	if err == nil {
+		t.Fatal("FilePut returned no error for an invalid request URL")
+	}
+}
+
 func TestS3_FileUploadPostAndPut(t *testing.T) {
 	testTxt, err := os.Open("testdata/test.txt")
 	if err != nil {
