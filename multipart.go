@@ -40,6 +40,8 @@ type InitiateMultipartUploadInput struct {
 	ServerSideEncryption string
 	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
 	SSEKMSKeyId string
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // InitiateMultipartUploadOutput contains the response from initiating a multipart upload
@@ -59,6 +61,9 @@ type initiateMultipartUploadResult struct {
 
 // InitiateMultipartUpload initiates a multipart upload and returns an upload ID
 func (s3 *S3) InitiateMultipartUpload(input InitiateMultipartUploadInput) (InitiateMultipartUploadOutput, error) {
+	if err := validateSSECustomerKey(input.SSECustomerKey, input.ServerSideEncryption, input.SSEKMSKeyId); err != nil {
+		return InitiateMultipartUploadOutput{}, err
+	}
 	if input.Bucket == "" {
 		return InitiateMultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -102,12 +107,14 @@ func (s3 *S3) InitiateMultipartUpload(input InitiateMultipartUploadInput) (Initi
 	// Empty body hash for POST with no body
 	req.Header.Set("x-amz-content-sha256", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 
+	if err := setSSECustomerHeaders(req, input.SSECustomerKey, false); err != nil {
+		return InitiateMultipartUploadOutput{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return InitiateMultipartUploadOutput{}, err
 	}
 
-	client := s3.getClient()
-	res, err := client.Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return InitiateMultipartUploadOutput{}, err
 	}
@@ -145,6 +152,8 @@ type UploadPartInput struct {
 	PartNumber int       // Required: part number (1-10000)
 	Body       io.Reader // Required: part data
 	Size       int64     // Required: size of part for Content-Length
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // UploadPartOutput contains the response from uploading a part
@@ -155,6 +164,9 @@ type UploadPartOutput struct {
 
 // UploadPart uploads a single part for a multipart upload
 func (s3 *S3) UploadPart(input UploadPartInput) (UploadPartOutput, error) {
+	if err := validateSSECustomerKey(input.SSECustomerKey, "", ""); err != nil {
+		return UploadPartOutput{}, err
+	}
 	if input.Bucket == "" {
 		return UploadPartOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -202,12 +214,14 @@ func (s3 *S3) UploadPart(input UploadPartInput) (UploadPartOutput, error) {
 	h.Write(content)
 	req.Header.Set("x-amz-content-sha256", fmt.Sprintf("%x", h.Sum(nil)))
 
+	if err := setSSECustomerHeaders(req, input.SSECustomerKey, false); err != nil {
+		return UploadPartOutput{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return UploadPartOutput{}, err
 	}
 
-	client := s3.getClient()
-	res, err := client.Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return UploadPartOutput{}, err
 	}
@@ -242,6 +256,14 @@ func (s3 *S3) uploadPartWithRetry(input UploadPartInput, maxRetries int) (Upload
 		maxRetries = DefaultMaxRetries
 	}
 
+	if input.Body == nil {
+		return UploadPartOutput{}, fmt.Errorf("body is required")
+	}
+	content, err := io.ReadAll(input.Body)
+	if err != nil {
+		return UploadPartOutput{}, err
+	}
+
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -253,6 +275,7 @@ func (s3 *S3) uploadPartWithRetry(input UploadPartInput, maxRetries int) (Upload
 			time.Sleep(waitTime)
 		}
 
+		input.Body = bytes.NewReader(content)
 		output, err := s3.UploadPart(input)
 		if err == nil {
 			return output, nil
@@ -309,6 +332,8 @@ type CompleteMultipartUploadInput struct {
 	ObjectKey string          // Required: object key
 	UploadID  string          // Required: upload ID
 	Parts     []CompletedPart // Required: list of parts, ordered by PartNumber
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // CompleteMultipartUploadOutput contains the response from completing a multipart upload
@@ -342,6 +367,9 @@ type completeMultipartUploadResult struct {
 
 // CompleteMultipartUpload completes a multipart upload
 func (s3 *S3) CompleteMultipartUpload(input CompleteMultipartUploadInput) (CompleteMultipartUploadOutput, error) {
+	if err := validateSSECustomerKey(input.SSECustomerKey, "", ""); err != nil {
+		return CompleteMultipartUploadOutput{}, err
+	}
 	if input.Bucket == "" {
 		return CompleteMultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -399,12 +427,14 @@ func (s3 *S3) CompleteMultipartUpload(input CompleteMultipartUploadInput) (Compl
 	contentMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
 	req.Header.Set("Content-MD5", contentMD5)
 
+	if err := setSSECustomerHeaders(req, input.SSECustomerKey, false); err != nil {
+		return CompleteMultipartUploadOutput{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return CompleteMultipartUploadOutput{}, err
 	}
 
-	client := s3.getClient()
-	res, err := client.Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return CompleteMultipartUploadOutput{}, err
 	}
@@ -656,6 +686,8 @@ type MultipartUploadInput struct {
 	ServerSideEncryption string
 	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
 	SSEKMSKeyId string
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // MultipartUploadOutput contains the response from a multipart upload
@@ -669,6 +701,9 @@ type MultipartUploadOutput struct {
 
 // FileUploadMultipart handles the entire multipart upload workflow
 func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOutput, error) {
+	if err := validateSSECustomerKey(input.SSECustomerKey, input.ServerSideEncryption, input.SSEKMSKeyId); err != nil {
+		return MultipartUploadOutput{}, err
+	}
 	if input.Bucket == "" {
 		return MultipartUploadOutput{}, fmt.Errorf("bucket name is required")
 	}
@@ -707,6 +742,7 @@ func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOu
 		ACL:                  input.ACL,
 		ServerSideEncryption: input.ServerSideEncryption,
 		SSEKMSKeyId:          input.SSEKMSKeyId,
+		SSECustomerKey:       input.SSECustomerKey,
 	})
 	if err != nil {
 		return MultipartUploadOutput{}, err
@@ -744,10 +780,10 @@ func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOu
 
 	if concurrency <= 1 {
 		// Sequential upload
-		completedParts, err2 = s3.uploadPartsSequential(bodyData, partSize, totalParts, initOutput.UploadID, input.Bucket, input.ObjectKey, maxRetries, input.OnProgress, &uploadedBytes, totalSize, startTime)
+		completedParts, err2 = s3.uploadPartsSequential(bodyData, partSize, totalParts, initOutput.UploadID, input.Bucket, input.ObjectKey, maxRetries, input.OnProgress, &uploadedBytes, totalSize, startTime, input.SSECustomerKey)
 	} else {
 		// Parallel upload
-		completedParts, err2 = s3.uploadPartsParallel2(bodyData, partSize, totalParts, initOutput.UploadID, input.Bucket, input.ObjectKey, maxRetries, concurrency, input.OnProgress, &uploadedBytes, totalSize, startTime)
+		completedParts, err2 = s3.uploadPartsParallel2(bodyData, partSize, totalParts, initOutput.UploadID, input.Bucket, input.ObjectKey, maxRetries, concurrency, input.OnProgress, &uploadedBytes, totalSize, startTime, input.SSECustomerKey)
 	}
 
 	if err2 != nil {
@@ -761,10 +797,11 @@ func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOu
 
 	// Complete multipart upload
 	completeOutput, err := s3.CompleteMultipartUpload(CompleteMultipartUploadInput{
-		Bucket:    input.Bucket,
-		ObjectKey: input.ObjectKey,
-		UploadID:  initOutput.UploadID,
-		Parts:     completedParts,
+		Bucket:         input.Bucket,
+		ObjectKey:      input.ObjectKey,
+		UploadID:       initOutput.UploadID,
+		Parts:          completedParts,
+		SSECustomerKey: input.SSECustomerKey,
 	})
 	if err != nil {
 		s3.AbortMultipartUpload(AbortMultipartUploadInput{
@@ -785,7 +822,7 @@ func (s3 *S3) FileUploadMultipart(input MultipartUploadInput) (MultipartUploadOu
 }
 
 // uploadPartsSequential uploads parts sequentially
-func (s3 *S3) uploadPartsSequential(bodyData []byte, partSize int64, totalParts int, uploadID, bucket, objectKey string, maxRetries int, onProgress ProgressFunc, uploadedBytes *int64, totalSize int64, startTime time.Time) ([]CompletedPart, error) {
+func (s3 *S3) uploadPartsSequential(bodyData []byte, partSize int64, totalParts int, uploadID, bucket, objectKey string, maxRetries int, onProgress ProgressFunc, uploadedBytes *int64, totalSize int64, startTime time.Time, sseCustomerKey []byte) ([]CompletedPart, error) {
 	completedParts := make([]CompletedPart, 0, totalParts)
 
 	for partNum := 1; partNum <= totalParts; partNum++ {
@@ -798,12 +835,13 @@ func (s3 *S3) uploadPartsSequential(bodyData []byte, partSize int64, totalParts 
 		partData := bodyData[start:end]
 
 		output, err := s3.uploadPartWithRetry(UploadPartInput{
-			Bucket:     bucket,
-			ObjectKey:  objectKey,
-			UploadID:   uploadID,
-			PartNumber: partNum,
-			Body:       bytes.NewReader(partData),
-			Size:       int64(len(partData)),
+			Bucket:         bucket,
+			ObjectKey:      objectKey,
+			UploadID:       uploadID,
+			PartNumber:     partNum,
+			Body:           bytes.NewReader(partData),
+			SSECustomerKey: sseCustomerKey,
+			Size:           int64(len(partData)),
 		}, maxRetries)
 
 		if err != nil {
@@ -845,7 +883,7 @@ type partData struct {
 }
 
 // uploadPartsParallel2 uploads parts in parallel using a worker pool
-func (s3 *S3) uploadPartsParallel2(bodyData []byte, partSize int64, totalParts int, uploadID, bucket, objectKey string, maxRetries, concurrency int, onProgress ProgressFunc, uploadedBytes *int64, totalSize int64, startTime time.Time) ([]CompletedPart, error) {
+func (s3 *S3) uploadPartsParallel2(bodyData []byte, partSize int64, totalParts int, uploadID, bucket, objectKey string, maxRetries, concurrency int, onProgress ProgressFunc, uploadedBytes *int64, totalSize int64, startTime time.Time, sseCustomerKey []byte) ([]CompletedPart, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -870,12 +908,13 @@ func (s3 *S3) uploadPartsParallel2(bodyData []byte, partSize int64, totalParts i
 					}
 
 					output, err := s3.uploadPartWithRetry(UploadPartInput{
-						Bucket:     bucket,
-						ObjectKey:  objectKey,
-						UploadID:   uploadID,
-						PartNumber: part.partNumber,
-						Body:       bytes.NewReader(part.data),
-						Size:       int64(len(part.data)),
+						Bucket:         bucket,
+						ObjectKey:      objectKey,
+						UploadID:       uploadID,
+						PartNumber:     part.partNumber,
+						Body:           bytes.NewReader(part.data),
+						SSECustomerKey: sseCustomerKey,
+						Size:           int64(len(part.data)),
 					}, maxRetries)
 
 					if err != nil {
