@@ -268,4 +268,3 @@ func TestBucketLifecycle(t *testing.T) {
 		}
 	})
 }
-

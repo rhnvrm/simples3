@@ -177,4 +177,3 @@ func TestMultipartUpload_WithEncryption(t *testing.T) {
 		t.Logf("Confirmed SSE-S3: %s", sse)
 	}
 }
-

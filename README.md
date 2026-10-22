@@ -760,7 +760,7 @@ just test-local
 
 `just test-local` starts SeaweedFS in its single-process `mini` mode with public
 test credentials and a pre-created `testbucket`, waits for authenticated bucket
-access, and runs the Go suite with the race detector. The S3 API listens only on
+access, and runs a fresh, uncached Go suite with the race detector. The S3 API listens only on
 `127.0.0.1:9000`. The credentials in this fixture are public and strictly for local
 tests. Automatic bucket creation on upload and recursive bucket deletion are
 explicitly disabled to exercise ordinary S3 behavior.

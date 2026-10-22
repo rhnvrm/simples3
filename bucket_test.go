@@ -252,4 +252,3 @@ func TestCreateBucket_Duplicate(t *testing.T) {
 		t.Logf("Got expected error for duplicate bucket: %v", err)
 	}
 }
-

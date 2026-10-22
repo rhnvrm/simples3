@@ -440,4 +440,3 @@ func TestCopyObject_WithTags(t *testing.T) {
 
 	t.Logf("Successfully copied with new tags: %+v", output.Tags)
 }
-

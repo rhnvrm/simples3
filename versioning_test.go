@@ -171,4 +171,3 @@ func TestVersioning(t *testing.T) {
 		t.Errorf("Expected current content 'v1', got '%s'", string(content))
 	}
 }
-
