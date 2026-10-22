@@ -76,9 +76,10 @@ type UploadInput struct {
 	// KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
 	SSEKMSKeyId string
 
-	Body io.ReadSeeker
 	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
 	SSECustomerKey []byte
+
+	Body io.ReadSeeker
 }
 
 // UploadResponse receives the following XML
@@ -286,7 +287,10 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		if err := requireSSEHTTPS(uc.UploadURL); err != nil {
 			return UploadResponse{}, err
 		}
-		headers, _ := SSECustomerHeaders(u.SSECustomerKey)
+		headers, err := SSECustomerHeaders(u.SSECustomerKey)
+		if err != nil {
+			return UploadResponse{}, err
+		}
 		for k, v := range headers {
 			uc.MetaData[k] = v
 		}

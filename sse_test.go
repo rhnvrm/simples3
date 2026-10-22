@@ -23,7 +23,7 @@ func checkSSECRequest(t *testing.T, s3 *S3, r *http.Request, key []byte, source 
 	t.Helper()
 	headers, err := SSECustomerHeaders(key)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("SSECustomerHeaders failed: %v", err)
 	}
 	for k, want := range headers {
 		if source {
@@ -51,7 +51,7 @@ func checkSSECRequest(t *testing.T, s3 *S3, r *http.Request, key []byte, source 
 	clone.Body = io.NopCloser(bytes.NewReader(body))
 	date, err := time.Parse(amzDateISO8601TimeFormat, r.Header.Get("X-Amz-Date"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to parse request date: %v", err)
 	}
 	hash := hmac.New(sha256.New, s3.signKeys(date))
 	s3.writeStringToSign(hash, date, clone)
@@ -63,7 +63,7 @@ func checkSSECRequest(t *testing.T, s3 *S3, r *http.Request, key []byte, source 
 func TestSSECHeaders(t *testing.T) {
 	headers, err := SSECustomerHeaders(testSSECKey)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("SSECustomerHeaders failed: %v", err)
 	}
 	if headers[sseCustomerPrefix+"key"] != "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" {
 		t.Error("incorrect key encoding")
@@ -101,15 +101,28 @@ func TestSSECObjectOperations(t *testing.T) {
 	}))
 	defer server.Close()
 	s3.SetEndpoint(server.URL).SetClient(server.Client())
-	if _, err := s3.FilePut(UploadInput{Bucket: "bucket", ObjectKey: "key", Body: strings.NewReader("encrypted content"), SSECustomerKey: testSSECKey}); err != nil {
-		t.Fatal(err)
+	if _, err := s3.FilePut(UploadInput{
+		Bucket:         "bucket",
+		ObjectKey:      "key",
+		Body:           strings.NewReader("encrypted content"),
+		SSECustomerKey: testSSECKey,
+	}); err != nil {
+		t.Fatalf("FilePut with SSE-C failed: %v", err)
 	}
-	if _, err := s3.FileDetails(DetailsInput{Bucket: "bucket", ObjectKey: "key", SSECustomerKey: testSSECKey}); err != nil {
-		t.Fatal(err)
+	if _, err := s3.FileDetails(DetailsInput{
+		Bucket:         "bucket",
+		ObjectKey:      "key",
+		SSECustomerKey: testSSECKey,
+	}); err != nil {
+		t.Fatalf("FileDetails with SSE-C failed: %v", err)
 	}
-	body, err := s3.FileDownload(DownloadInput{Bucket: "bucket", ObjectKey: "key", SSECustomerKey: testSSECKey})
+	body, err := s3.FileDownload(DownloadInput{
+		Bucket:         "bucket",
+		ObjectKey:      "key",
+		SSECustomerKey: testSSECKey,
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("FileDownload with SSE-C failed: %v", err)
 	}
 	defer body.Close()
 	got, _ := io.ReadAll(body)
@@ -117,10 +130,18 @@ func TestSSECObjectOperations(t *testing.T) {
 		t.Errorf("unexpected content: %q", got)
 	}
 	for _, key := range [][]byte{nil, bytes.Repeat([]byte{1}, 32)} {
-		if _, err := s3.FileDownload(DownloadInput{Bucket: "bucket", ObjectKey: "key", SSECustomerKey: key}); err == nil {
+		if _, err := s3.FileDownload(DownloadInput{
+			Bucket:         "bucket",
+			ObjectKey:      "key",
+			SSECustomerKey: key,
+		}); err == nil {
 			t.Error("download unexpectedly succeeded with missing/wrong key")
 		}
-		if _, err := s3.FileDetails(DetailsInput{Bucket: "bucket", ObjectKey: "key", SSECustomerKey: key}); err == nil {
+		if _, err := s3.FileDetails(DetailsInput{
+			Bucket:         "bucket",
+			ObjectKey:      "key",
+			SSECustomerKey: key,
+		}); err == nil {
 			t.Error("HEAD unexpectedly succeeded with missing/wrong key")
 		}
 	}
@@ -136,9 +157,16 @@ func TestSSECCopy(t *testing.T) {
 	}))
 	defer server.Close()
 	s3.SetEndpoint(server.URL).SetClient(server.Client())
-	_, err := s3.CopyObject(CopyObjectInput{SourceBucket: "bucket", SourceKey: "source", DestBucket: "bucket", DestKey: "dest", SSECustomerKey: testSSECKey, SourceSSECustomerKey: sourceKey})
+	_, err := s3.CopyObject(CopyObjectInput{
+		SourceBucket:         "bucket",
+		SourceKey:            "source",
+		DestBucket:           "bucket",
+		DestKey:              "dest",
+		SSECustomerKey:       testSSECKey,
+		SourceSSECustomerKey: sourceKey,
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CopyObject with SSE-C failed: %v", err)
 	}
 }
 
@@ -179,8 +207,14 @@ func TestSSECPost(t *testing.T) {
 	}))
 	defer server.Close()
 	s3.SetEndpoint(server.URL).SetClient(server.Client())
-	if _, err := s3.FileUpload(UploadInput{Bucket: "bucket", ObjectKey: "key", FileName: "key", Body: strings.NewReader("content"), SSECustomerKey: testSSECKey}); err != nil {
-		t.Fatal(err)
+	if _, err := s3.FileUpload(UploadInput{
+		Bucket:         "bucket",
+		ObjectKey:      "key",
+		FileName:       "key",
+		Body:           strings.NewReader("content"),
+		SSECustomerKey: testSSECKey,
+	}); err != nil {
+		t.Fatalf("FileUpload with SSE-C failed: %v", err)
 	}
 }
 
@@ -227,9 +261,15 @@ func TestSSECMultipart(t *testing.T) {
 			}))
 			defer server.Close()
 			s3.SetEndpoint(server.URL).SetClient(server.Client())
-			_, err := s3.FileUploadMultipart(MultipartUploadInput{Bucket: "bucket", ObjectKey: "key", Body: bytes.NewReader(bytes.Repeat([]byte{'a'}, int(MinPartSize)+1)), SSECustomerKey: testSSECKey, Concurrency: concurrency})
+			_, err := s3.FileUploadMultipart(MultipartUploadInput{
+				Bucket:         "bucket",
+				ObjectKey:      "key",
+				Body:           bytes.NewReader(bytes.Repeat([]byte{'a'}, int(MinPartSize)+1)),
+				SSECustomerKey: testSSECKey,
+				Concurrency:    concurrency,
+			})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("FileUploadMultipart with SSE-C failed: %v", err)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -254,19 +294,47 @@ func TestSSECValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := []func() error{
 				func() error {
-					_, err := s3.FilePut(UploadInput{Bucket: "b", ObjectKey: "k", Body: strings.NewReader("x"), SSECustomerKey: tc.key, ServerSideEncryption: tc.encryption, SSEKMSKeyId: tc.kms})
+					_, err := s3.FilePut(UploadInput{
+						Bucket:               "b",
+						ObjectKey:            "k",
+						Body:                 strings.NewReader("x"),
+						SSECustomerKey:       tc.key,
+						ServerSideEncryption: tc.encryption,
+						SSEKMSKeyId:          tc.kms,
+					})
 					return err
 				},
 				func() error {
-					_, err := s3.FileUpload(UploadInput{Bucket: "b", ObjectKey: "k", Body: strings.NewReader("x"), SSECustomerKey: tc.key, ServerSideEncryption: tc.encryption, SSEKMSKeyId: tc.kms})
+					_, err := s3.FileUpload(UploadInput{
+						Bucket:               "b",
+						ObjectKey:            "k",
+						Body:                 strings.NewReader("x"),
+						SSECustomerKey:       tc.key,
+						ServerSideEncryption: tc.encryption,
+						SSEKMSKeyId:          tc.kms,
+					})
 					return err
 				},
 				func() error {
-					_, err := s3.InitiateMultipartUpload(InitiateMultipartUploadInput{Bucket: "b", ObjectKey: "k", SSECustomerKey: tc.key, ServerSideEncryption: tc.encryption, SSEKMSKeyId: tc.kms})
+					_, err := s3.InitiateMultipartUpload(InitiateMultipartUploadInput{
+						Bucket:               "b",
+						ObjectKey:            "k",
+						SSECustomerKey:       tc.key,
+						ServerSideEncryption: tc.encryption,
+						SSEKMSKeyId:          tc.kms,
+					})
 					return err
 				},
 				func() error {
-					_, err := s3.CopyObject(CopyObjectInput{SourceBucket: "b", SourceKey: "s", DestBucket: "b", DestKey: "d", SSECustomerKey: tc.key, ServerSideEncryption: tc.encryption, SSEKMSKeyId: tc.kms})
+					_, err := s3.CopyObject(CopyObjectInput{
+						SourceBucket:         "b",
+						SourceKey:            "s",
+						DestBucket:           "b",
+						DestKey:              "d",
+						SSECustomerKey:       tc.key,
+						ServerSideEncryption: tc.encryption,
+						SSEKMSKeyId:          tc.kms,
+					})
 					return err
 				},
 			}
@@ -285,7 +353,22 @@ func TestSSECPresigned(t *testing.T) {
 	s3 := New("us-east-1", "access", "secret")
 	for _, endpoint := range []string{"https://example.com", "http://example.com"} {
 		s3.SetEndpoint(endpoint)
-		urls := []string{s3.GeneratePresignedURL(PresignedInput{Bucket: "b", ObjectKey: "k", Method: "GET", ExpirySeconds: 60, ExtraHeaders: headers}), s3.GeneratePresignedUploadPartURL(PresignedMultipartInput{Bucket: "b", ObjectKey: "k", UploadID: "upload", PartNumber: 1, ExtraHeaders: headers})}
+		urls := []string{
+			s3.GeneratePresignedURL(PresignedInput{
+				Bucket:        "b",
+				ObjectKey:     "k",
+				Method:        "GET",
+				ExpirySeconds: 60,
+				ExtraHeaders:  headers,
+			}),
+			s3.GeneratePresignedUploadPartURL(PresignedMultipartInput{
+				Bucket:       "b",
+				ObjectKey:    "k",
+				UploadID:     "upload",
+				PartNumber:   1,
+				ExtraHeaders: headers,
+			}),
+		}
 		for _, raw := range urls {
 			if strings.HasPrefix(endpoint, "http:") {
 				if raw != "" {
@@ -295,7 +378,7 @@ func TestSSECPresigned(t *testing.T) {
 			}
 			u, err := url.Parse(raw)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("Failed to parse presigned URL: %v", err)
 			}
 			signed := u.Query().Get("X-Amz-SignedHeaders")
 			for k, v := range headers {
@@ -319,9 +402,16 @@ func TestSSECRedirects(t *testing.T) {
 			defer server.Close()
 			called := false
 			client := server.Client()
-			client.CheckRedirect = func(*http.Request, []*http.Request) error { called = true; return nil }
+			client.CheckRedirect = func(*http.Request, []*http.Request) error {
+				called = true
+				return nil
+			}
 			s3 := New("us-east-1", "access", "secret").SetEndpoint(server.URL).SetClient(client)
-			if _, err := s3.FileDownload(DownloadInput{Bucket: "b", ObjectKey: "k", SSECustomerKey: testSSECKey}); err == nil {
+			if _, err := s3.FileDownload(DownloadInput{
+				Bucket:         "b",
+				ObjectKey:      "k",
+				SSECustomerKey: testSSECKey,
+			}); err == nil {
 				t.Error("allowed unsafe redirect")
 			}
 			if called {
@@ -336,27 +426,60 @@ func TestSSECReadAndMultipartValidation(t *testing.T) {
 	for _, key := range [][]byte{[]byte("short"), testSSECKey} {
 		calls := []func() error{
 			func() error {
-				_, err := s3.FileDownload(DownloadInput{Bucket: "b", ObjectKey: "k", SSECustomerKey: key})
+				_, err := s3.FileDownload(DownloadInput{
+					Bucket:         "b",
+					ObjectKey:      "k",
+					SSECustomerKey: key,
+				})
 				return err
 			},
 			func() error {
-				_, err := s3.FileDetails(DetailsInput{Bucket: "b", ObjectKey: "k", SSECustomerKey: key})
+				_, err := s3.FileDetails(DetailsInput{
+					Bucket:         "b",
+					ObjectKey:      "k",
+					SSECustomerKey: key,
+				})
 				return err
 			},
 			func() error {
-				_, err := s3.UploadPart(UploadPartInput{Bucket: "b", ObjectKey: "k", UploadID: "id", PartNumber: 1, Body: strings.NewReader("x"), Size: 1, SSECustomerKey: key})
+				_, err := s3.UploadPart(UploadPartInput{
+					Bucket:         "b",
+					ObjectKey:      "k",
+					UploadID:       "id",
+					PartNumber:     1,
+					Body:           strings.NewReader("x"),
+					Size:           1,
+					SSECustomerKey: key,
+				})
 				return err
 			},
 			func() error {
-				_, err := s3.CompleteMultipartUpload(CompleteMultipartUploadInput{Bucket: "b", ObjectKey: "k", UploadID: "id", Parts: []CompletedPart{{PartNumber: 1, ETag: "etag"}}, SSECustomerKey: key})
+				_, err := s3.CompleteMultipartUpload(CompleteMultipartUploadInput{
+					Bucket:         "b",
+					ObjectKey:      "k",
+					UploadID:       "id",
+					Parts:          []CompletedPart{{PartNumber: 1, ETag: "etag"}},
+					SSECustomerKey: key,
+				})
 				return err
 			},
 			func() error {
-				_, err := s3.FileUploadMultipart(MultipartUploadInput{Bucket: "b", ObjectKey: "k", Body: strings.NewReader("x"), SSECustomerKey: key})
+				_, err := s3.FileUploadMultipart(MultipartUploadInput{
+					Bucket:         "b",
+					ObjectKey:      "k",
+					Body:           strings.NewReader("x"),
+					SSECustomerKey: key,
+				})
 				return err
 			},
 			func() error {
-				_, err := s3.CopyObject(CopyObjectInput{SourceBucket: "b", SourceKey: "s", DestBucket: "b", DestKey: "d", SourceSSECustomerKey: key})
+				_, err := s3.CopyObject(CopyObjectInput{
+					SourceBucket:         "b",
+					SourceKey:            "s",
+					DestBucket:           "b",
+					DestKey:              "d",
+					SourceSSECustomerKey: key,
+				})
 				return err
 			},
 		}
@@ -383,11 +506,18 @@ func TestSSECSameOriginRedirectPolicy(t *testing.T) {
 	}))
 	defer server.Close()
 	client := server.Client()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { called = true; return nil }
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		called = true
+		return nil
+	}
 	s3 := New("us-east-1", "access", "secret").SetEndpoint(server.URL).SetClient(client)
-	body, err := s3.FileDownload(DownloadInput{Bucket: "b", ObjectKey: "k", SSECustomerKey: testSSECKey})
+	body, err := s3.FileDownload(DownloadInput{
+		Bucket:         "b",
+		ObjectKey:      "k",
+		SSECustomerKey: testSSECKey,
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("FileDownload after redirect failed: %v", err)
 	}
 	body.Close()
 	if !called {
@@ -404,15 +534,20 @@ func TestSSECLoopbackProxySignature(t *testing.T) {
 	defer backend.Close()
 	s3.SetEndpoint(backend.URL)
 	configureSSECLoopbackProxy(t, s3)
-	if _, err := s3.FilePut(UploadInput{Bucket: "bucket", ObjectKey: "key", Body: strings.NewReader("content"), SSECustomerKey: testSSECKey}); err != nil {
-		t.Fatal(err)
+	if _, err := s3.FilePut(UploadInput{
+		Bucket:         "bucket",
+		ObjectKey:      "key",
+		Body:           strings.NewReader("content"),
+		SSECustomerKey: testSSECKey,
+	}); err != nil {
+		t.Fatalf("FilePut through test proxy failed: %v", err)
 	}
 }
 
 func TestSSECCanonicalHeaderPrefixOrder(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPut, "https://example.com", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create signing test request: %v", err)
 	}
 	req.Header.Set("X-Amz-Server-Side-Encryption-Customer-Key", "key")
 	req.Header.Set("X-Amz-Server-Side-Encryption-Customer-Key-MD5", "checksum")
