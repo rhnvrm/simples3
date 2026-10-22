@@ -747,65 +747,68 @@ if err != nil {
 
 ## Development
 
-### Setup Development Environment
+Local integration tests use the official `dxflrs/garage:v2.4.1` image, pinned in
+`docker-compose.yml`. Docker Compose v2 is required. Nix supplies Go, Just and the
+AWS CLI:
 
 ```sh
-# Clone the repository
 git clone https://github.com/rhnvrm/simples3.git
 cd simples3
-
-# Using Nix (recommended)
 nix develop
-
-# Or using direnv
-direnv allow
-
-# Start local MinIO for testing
-just setup
-
-# Run tests
 just test-local
 ```
 
-### Testing
-
-The library includes comprehensive tests that run against a local MinIO instance:
+`just test-local` starts Garage, waits for readiness, initializes a single-node
+layout, imports public test credentials, grants bucket creation permission, creates
+`testbucket`, and runs the Go suite with the race detector. Setup is idempotent.
+The S3 API listens only on `127.0.0.1:9000`. The credentials and RPC secret in this
+fixture are public and strictly for local tests.
 
 ```sh
-# Run all tests (without MinIO)
-just test
-
-# Run tests with local MinIO
-just test-local
-
-# Run specific test
-go test -v -run TestList
+just setup         # Initialize Garage without running tests
+just garage-up     # Start the container (setup also configures it)
+just garage-down   # Stop Garage, retain test data
+just garage-logs   # Follow server logs
+just garage-reset  # Remove local test data and initialize a fresh fixture
+just test          # Run tests against the currently configured endpoint
+just vet
+just status
 ```
 
-### Available Commands
+### Backend compatibility and test coverage
+
+Garage runs real bucket/object CRUD, listing, copy, form POST, multipart,
+presigned-request and supported lifecycle integration tests. Garage does not
+implement ACL writes, object tagging, versioning or SSE-S3/KMS, so those integration
+tests are explicitly skipped only when `SIMPLES3_TEST_BACKEND=garage`.
+`backend_protocol_test.go` always verifies the client request headers, signed POST
+policy conditions, XML serialization, response parsing and version query parameters
+for those APIs using local HTTP servers. Those protocol tests are not a substitute
+for full AWS service integration coverage.
+
+Run the protocol tests without an external S3 service:
 
 ```sh
-just              # List all commands
-just test         # Run tests without MinIO
-just test-local   # Run tests with MinIO (includes setup)
-just setup        # Setup development environment
-just minio-up      # Start MinIO container
-just minio-down    # Stop MinIO container
-just clean         # Clean up everything
-just status        # Check development environment status
+go test -race ./... -run '^TestBackendProtocol'
 ```
 
-## Environment Variables
-
-For development and testing:
+To run integration tests against another compatible test endpoint, set the usual
+credentials and unset the Garage backend marker. Use a dedicated account and test
+bucket: integration tests create and delete buckets and objects.
 
 ```sh
+unset SIMPLES3_TEST_BACKEND
 export AWS_S3_REGION="us-east-1"
-export AWS_S3_ACCESS_KEY="minioadmin"
-export AWS_S3_SECRET_KEY="minioadmin"
-export AWS_S3_ENDPOINT="http://localhost:9000"
-export AWS_S3_BUCKET="testbucket"
+export AWS_S3_ACCESS_KEY="your-access-key"
+export AWS_S3_SECRET_KEY="your-secret-key"
+export AWS_S3_ENDPOINT="https://your-test-endpoint"
+export AWS_S3_BUCKET="your-test-bucket"
+go test -v ./...
 ```
+
+Local fixture values shared by Nix, setup and test commands are defined in
+`scripts/garage-env.sh`. Garage's compatibility details are documented at
+https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/.
 
 ## Contributing
 
@@ -818,3 +821,4 @@ Rohan Verma <hello@rohanverma.net>
 ## License
 
 BSD-2-Clause-FreeBSD
+

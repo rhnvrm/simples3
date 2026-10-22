@@ -9,6 +9,7 @@ import (
 )
 
 func TestFilePut_WithEncryption(t *testing.T) {
+	requireBackendFeature(t, "SSE-S3/KMS")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -52,6 +53,7 @@ func TestFilePut_WithEncryption(t *testing.T) {
 }
 
 func TestFileUpload_WithEncryption(t *testing.T) {
+	requireBackendFeature(t, "SSE-S3/KMS")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -90,6 +92,7 @@ func TestFileUpload_WithEncryption(t *testing.T) {
 }
 
 func TestCopyObject_WithEncryption(t *testing.T) {
+	requireBackendFeature(t, "SSE-S3/KMS")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -142,6 +145,7 @@ func TestCopyObject_WithEncryption(t *testing.T) {
 }
 
 func TestMultipartUpload_WithEncryption(t *testing.T) {
+	requireBackendFeature(t, "SSE-S3/KMS")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
