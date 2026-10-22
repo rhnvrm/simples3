@@ -1,4 +1,4 @@
-# SimpleS3 development commands. Local integration tests use Garage.
+# SimpleS3 development commands. Local integration tests use SeaweedFS.
 default:
     @just --list
 
@@ -17,28 +17,27 @@ fmt:
 vet:
     @go vet ./...
 
-garage-up:
-    @docker compose up -d --wait --wait-timeout 90
+seaweedfs-up:
+    @docker compose up -d seaweedfs
 
-garage-down:
+seaweedfs-down:
     @docker compose down
 
-garage-logs:
-    @docker compose logs -f garage
+seaweedfs-logs:
+    @docker compose logs -f seaweedfs
 
-garage-clean:
+seaweedfs-clean:
     @docker compose down --volumes
 
-garage-reset: garage-clean setup
+seaweedfs-reset: seaweedfs-clean setup
 
 setup:
-    @bash scripts/garage-setup.sh
+    @bash scripts/seaweedfs-setup.sh
 
 dev-env: setup
-    @echo "Garage S3 API: http://127.0.0.1:9000"
+    @echo "SeaweedFS S3 API: http://127.0.0.1:9000"
 
-clean: garage-clean
+clean: seaweedfs-clean
 
 status:
     @docker compose ps
-    @docker compose exec -T garage /garage status

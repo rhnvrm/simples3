@@ -12,8 +12,8 @@ import (
 	"testing"
 )
 
-// Garage deliberately omits these S3 features. Keep testing the client's wire
-// format and response parsing independently of the integration backend.
+// Verify client wire formats and response parsing independently of the integration
+// backend. Real SeaweedFS integration tests exercise these features as well.
 func TestBackendProtocol(t *testing.T) {
 	acl := AccessControlPolicy{Owner: Owner{ID: "owner", DisplayName: "Owner"}, AccessControlList: []Grant{{Grantee: Grantee{Type: "CanonicalUser", ID: "owner"}, Permission: "FULL_CONTROL"}}}
 	aclXML, _ := xml.Marshal(acl)

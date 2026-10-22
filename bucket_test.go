@@ -7,21 +7,6 @@ import (
 	"time"
 )
 
-// requireBackendFeature skips only documented Garage capability gaps. Other
-// endpoints still run the full integration suite. Wire-format coverage for these
-// features lives in backend_protocol_test.go and always runs.
-func requireBackendFeature(t *testing.T, feature string) {
-	t.Helper()
-	if os.Getenv("SIMPLES3_TEST_BACKEND") == "garage" {
-		switch feature {
-		case "ACL", "tagging", "versioning", "SSE-S3/KMS":
-			t.Skipf("Garage does not implement %s; client protocol tests still run", feature)
-		default:
-			t.Fatalf("unknown backend feature %q", feature)
-		}
-	}
-}
-
 func setupTestS3(t *testing.T) *S3 {
 	t.Helper()
 
@@ -267,3 +252,4 @@ func TestCreateBucket_Duplicate(t *testing.T) {
 		t.Logf("Got expected error for duplicate bucket: %v", err)
 	}
 }
+

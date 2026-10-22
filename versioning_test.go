@@ -9,7 +9,6 @@ import (
 )
 
 func TestVersioning(t *testing.T) {
-	requireBackendFeature(t, "versioning")
 	s3 := setupTestS3(t)
 	bucket := fmt.Sprintf("simples3-versioning-test-%d", time.Now().Unix())
 
@@ -172,3 +171,4 @@ func TestVersioning(t *testing.T) {
 		t.Errorf("Expected current content 'v1', got '%s'", string(content))
 	}
 }
+

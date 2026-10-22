@@ -747,7 +747,7 @@ if err != nil {
 
 ## Development
 
-Local integration tests use the official `dxflrs/garage:v2.4.1` image, pinned in
+Local integration tests use the official `chrislusf/seaweedfs:4.48` image, pinned in
 `docker-compose.yml`. Docker Compose v2 is required. Nix supplies Go, Just and the
 AWS CLI:
 
@@ -758,46 +758,42 @@ nix develop
 just test-local
 ```
 
-`just test-local` starts Garage, waits for readiness, initializes a single-node
-layout, imports public test credentials, grants bucket creation permission, creates
-`testbucket`, and runs the Go suite with the race detector. Setup is idempotent.
-The S3 API listens only on `127.0.0.1:9000`. The credentials and RPC secret in this
-fixture are public and strictly for local tests.
+`just test-local` starts SeaweedFS in its single-process `mini` mode with public
+test credentials and a pre-created `testbucket`, waits for authenticated bucket
+access, and runs the Go suite with the race detector. The S3 API listens only on
+`127.0.0.1:9000`. The credentials in this fixture are public and strictly for local
+tests. Automatic bucket creation on upload and recursive bucket deletion are
+explicitly disabled to exercise ordinary S3 behavior.
 
 ```sh
-just setup         # Initialize Garage without running tests
-just garage-up     # Start the container (setup also configures it)
-just garage-down   # Stop Garage, retain test data
-just garage-logs   # Follow server logs
-just garage-reset  # Remove local test data and initialize a fresh fixture
-just test          # Run tests against the currently configured endpoint
+just setup           # Start SeaweedFS and wait for authenticated S3 readiness
+just seaweedfs-up    # Start the container without waiting for S3 readiness
+just seaweedfs-down  # Stop SeaweedFS, retain test data
+just seaweedfs-logs  # Follow server logs
+just seaweedfs-reset # Remove local test data and initialize a fresh fixture
+just test            # Run tests against the currently configured endpoint
 just vet
 just status
 ```
 
-### Backend compatibility and test coverage
+### Test coverage
 
-Garage runs real bucket/object CRUD, listing, copy, form POST, multipart,
-presigned-request and supported lifecycle integration tests. Garage does not
-implement ACL writes, object tagging, versioning or SSE-S3/KMS, so those integration
-tests are explicitly skipped only when `SIMPLES3_TEST_BACKEND=garage`.
-`backend_protocol_test.go` always verifies the client request headers, signed POST
-policy conditions, XML serialization, response parsing and version query parameters
-for those APIs using local HTTP servers. Those protocol tests are not a substitute
-for full AWS service integration coverage.
-
-Run the protocol tests without an external S3 service:
+The existing integration suite runs against SeaweedFS, including ACLs, tagging,
+versioning and SSE-S3 tests. No backend-specific capability skips are added. The existing
+POST-tagging integration test remains skipped pending client/backend compatibility.
+`backend_protocol_test.go` additionally checks request headers, signed POST policy
+conditions, XML serialization, response parsing and version query parameters using
+local HTTP servers. Run these checks without an external S3 service:
 
 ```sh
 go test -race ./... -run '^TestBackendProtocol'
 ```
 
-To run integration tests against another compatible test endpoint, set the usual
-credentials and unset the Garage backend marker. Use a dedicated account and test
-bucket: integration tests create and delete buckets and objects.
+To use another compatible test endpoint, configure its credentials and test bucket.
+Use a dedicated account and bucket: integration tests create and delete buckets
+and objects.
 
 ```sh
-unset SIMPLES3_TEST_BACKEND
 export AWS_S3_REGION="us-east-1"
 export AWS_S3_ACCESS_KEY="your-access-key"
 export AWS_S3_SECRET_KEY="your-secret-key"
@@ -807,8 +803,7 @@ go test -v ./...
 ```
 
 Local fixture values shared by Nix, setup and test commands are defined in
-`scripts/garage-env.sh`. Garage's compatibility details are documented at
-https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/.
+`scripts/seaweedfs-env.sh` and match the public values in Compose.
 
 ## Contributing
 

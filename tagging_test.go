@@ -9,7 +9,6 @@ import (
 )
 
 func TestPutGetDeleteObjectTagging(t *testing.T) {
-	requireBackendFeature(t, "tagging")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -278,7 +277,6 @@ func TestGetObjectTagging_NonExistent(t *testing.T) {
 }
 
 func TestFilePut_WithTags(t *testing.T) {
-	requireBackendFeature(t, "tagging")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -325,7 +323,6 @@ func TestFilePut_WithTags(t *testing.T) {
 }
 
 func TestFileUpload_WithTags(t *testing.T) {
-	requireBackendFeature(t, "tagging")
 	// Skip: MinIO doesn't support x-amz-tagging in POST upload policies
 	// This functionality works on AWS S3.
 	t.Skip("MinIO limitation: tagging via POST upload not fully supported")
@@ -377,7 +374,6 @@ func TestFileUpload_WithTags(t *testing.T) {
 }
 
 func TestCopyObject_WithTags(t *testing.T) {
-	requireBackendFeature(t, "tagging")
 	s3 := setupTestS3(t)
 	testBucket := os.Getenv("AWS_S3_BUCKET")
 	timestamp := time.Now().Unix()
@@ -444,3 +440,4 @@ func TestCopyObject_WithTags(t *testing.T) {
 
 	t.Logf("Successfully copied with new tags: %+v", output.Tags)
 }
+

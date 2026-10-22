@@ -9,7 +9,6 @@ import (
 )
 
 func TestBucketAcl(t *testing.T) {
-	requireBackendFeature(t, "ACL")
 	s3 := setupTestS3(t)
 	bucketName := fmt.Sprintf("simples3-test-acl-%d", time.Now().UnixNano())
 
@@ -92,7 +91,6 @@ func TestBucketAcl(t *testing.T) {
 }
 
 func TestObjectAcl(t *testing.T) {
-	requireBackendFeature(t, "ACL")
 	s3 := setupTestS3(t)
 	bucketName := fmt.Sprintf("simples3-test-obj-acl-%d", time.Now().UnixNano())
 	objectKey := "test-object.txt"
@@ -270,3 +268,4 @@ func TestBucketLifecycle(t *testing.T) {
 		}
 	})
 }
+

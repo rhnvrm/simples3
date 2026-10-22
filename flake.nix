@@ -43,7 +43,7 @@
             export PATH=$PATH:$GOPATH/bin
 
             # Shared public test-fixture settings for the CLI and the Go tests.
-            source ${./scripts/garage-env.sh}
+            source ${./scripts/seaweedfs-env.sh}
           '';
         };
       });

@@ -1,19 +1,21 @@
 services:
-  garage:
-    image: dxflrs/garage:v2.4.1
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
     ports:
-      - "127.0.0.1:9000:3900"
+      - "127.0.0.1:9000:8333"
+    environment:
+      # Public local-test credentials; never use in production.
+      AWS_ACCESS_KEY_ID: simples3-test
+      AWS_SECRET_ACCESS_KEY: simples3-test-secret
+      S3_BUCKET: testbucket
     volumes:
-      - ./garage.toml:/etc/garage.toml:ro
-      - garage_meta:/var/lib/garage/meta
-      - garage_data:/var/lib/garage/data
-    command: ["server"]
-    healthcheck:
-      test: ["CMD", "/garage", "status"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
+      - seaweedfs_data:/data
+    command:
+      - mini
+      - -dir=/data
+      - -ip=127.0.0.1
+      - -s3.autoCreateBucket=false
+      - -s3.allowDeleteBucketNotEmpty=false
 
 volumes:
-  garage_meta:
-  garage_data:
+  seaweedfs_data:

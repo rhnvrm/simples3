@@ -21,10 +21,10 @@ jobs:
       - name: Run Tests via Justfile
         run: nix develop --command just test-local
 
-      - name: Garage diagnostics
+      - name: SeaweedFS diagnostics
         if: failure()
-        run: docker compose logs garage
+        run: docker compose logs seaweedfs
 
-      - name: Stop Garage
+      - name: Stop SeaweedFS
         if: always()
         run: docker compose down --volumes
