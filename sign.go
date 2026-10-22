@@ -98,18 +98,22 @@ func writeQuery(w io.Writer, r *http.Request) {
 }
 
 func writeHeader(w io.Writer, r *http.Request) {
-	i, a := 0, make([]string, len(r.Header))
-	for k, v := range r.Header {
-		sort.Strings(v)
-		a[i] = strings.ToLower(k) + ":" + strings.Join(v, ",")
-		i++
+	keys := make([]string, 0, len(r.Header))
+	for k := range r.Header {
+		keys = append(keys, k)
 	}
-	sort.Strings(a)
-	for i, s := range a {
+	// Sort names before adding the colon/value. Sorting complete header lines
+	// puts "key-md5:value" before "key:value", violating SigV4 name ordering.
+	sort.Slice(keys, func(i, j int) bool {
+		return strings.ToLower(keys[i]) < strings.ToLower(keys[j])
+	})
+	for i, k := range keys {
 		if i > 0 {
 			w.Write(newLine)
 		}
-		io.WriteString(w, s)
+		values := r.Header[k]
+		sort.Strings(values)
+		io.WriteString(w, strings.ToLower(k)+":"+strings.Join(values, ","))
 	}
 }
 

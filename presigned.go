@@ -77,6 +77,12 @@ func (s3 *S3) GeneratePresignedURL(in PresignedInput) string {
 		hostname = host.String()
 	}
 
+	if hasSSECustomerHeaders(in.ExtraHeaders) {
+		if err := requireSSEHTTPS(protocol + hostname); err != nil {
+			return ""
+		}
+	}
+
 	// Add host to Headers
 	signedHeaders := map[string][]byte{}
 	for k, v := range in.ExtraHeaders {
@@ -239,6 +245,8 @@ type PresignedMultipartInput struct {
 	UploadID      string // Required: upload ID from InitiateMultipartUpload
 	PartNumber    int    // Required: part number (1-10000)
 	ExpirySeconds int    // Optional: default 3600
+	// Optional: headers to sign; the uploader must send the same values.
+	ExtraHeaders map[string]string
 }
 
 // GeneratePresignedUploadPartURL generates a presigned URL for uploading a specific part
@@ -283,11 +291,22 @@ func (s3 *S3) GeneratePresignedUploadPartURL(in PresignedMultipartInput) string 
 		hostname = host.String()
 	}
 
+	if hasSSECustomerHeaders(in.ExtraHeaders) {
+		if err := requireSSEHTTPS(protocol + hostname); err != nil {
+			return ""
+		}
+	}
+
 	// Add host to Headers
 	// AWS requires header names to be lowercase per spec
 	signedHeaders := map[string][]byte{
 		"host": []byte(hostname),
 	}
+	for k, v := range in.ExtraHeaders {
+		signedHeaders[strings.ToLower(k)] = []byte(v)
+	}
+	// The URL's host must always be used for signing.
+	signedHeaders["host"] = []byte(hostname)
 
 	// Build signed headers string
 	sortedSH := make([]string, 0, len(signedHeaders))

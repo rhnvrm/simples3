@@ -17,7 +17,7 @@ using AWS Signature Version 4.
 - **Iterator-based ListAll** for memory-efficient large bucket iteration (Go 1.23+)
 - **Presigned URL generation** for secure browser uploads/downloads (including multipart)
 - **Object Versioning** - Enable versioning, list versions, and access specific object versions
-- **Server-Side Encryption** - Support for SSE-S3 (AES256) and SSE-KMS encryption
+- **Server-Side Encryption** - Support for SSE-S3 (AES256), SSE-KMS and SSE-C encryption
 - **IAM credential support** for EC2 instances
 - **Comprehensive test coverage**
 - **Zero dependencies** - uses only Go standard library
@@ -488,7 +488,7 @@ err := s3.FileDelete(simples3.DeleteInput{
 
 ### Server-Side Encryption
  
- Secure your data at rest using Server-Side Encryption (SSE). SimpleS3 supports both SSE-S3 (AES256) and SSE-KMS.
+ Secure your data at rest using Server-Side Encryption (SSE). SimpleS3 supports SSE-S3 (AES256), SSE-KMS and SSE-C (customer-provided keys).
  
  #### Upload with SSE-S3 (AES256)
  
@@ -536,6 +536,98 @@ err := s3.FileDelete(simples3.DeleteInput{
  })
  ```
  
+ #### Upload and download with SSE-C
+
+SSE-C encrypts objects on the storage server using a key you supply for each
+operation. Pass the **raw 32-byte key**, not a base64 string; SimpleS3 generates
+AES256, base64 key and key-MD5 headers before signing. Leave
+`ServerSideEncryption` and `SSEKMSKeyId` empty when using SSE-C.
+
+```go
+// Load a securely generated and durably stored key from your key manager.
+// Losing the key means losing access to the object.
+var key []byte = loadKeyFromYourKeyManager() // exactly 32 bytes
+
+_, err := s3.FilePut(simples3.UploadInput{
+    Bucket:         "my-bucket",
+    ObjectKey:      "secret.txt",
+    Body:           strings.NewReader("secret content"),
+    SSECustomerKey: key,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+body, err := s3.FileDownload(simples3.DownloadInput{
+    Bucket:         "my-bucket",
+    ObjectKey:      "secret.txt",
+    SSECustomerKey: key,
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer body.Close()
+```
+
+`FileDetails`, `FileUpload` (form POST), `FileUploadMultipart`,
+`InitiateMultipartUpload`, `UploadPart` and `CompleteMultipartUpload` also accept
+`SSECustomerKey`. With the low-level multipart API, pass the same key to initiation,
+every part and completion. The high-level API propagates it automatically, including
+parallel uploads and retries. Do not modify key bytes while an operation is running.
+
+For `CopyObject`, `SourceSSECustomerKey` decrypts the source and `SSECustomerKey`
+encrypts the destination. These may be different keys. A source SSE-C key can also
+be used when the destination uses SSE-S3 or SSE-KMS. Deleting objects needs no key.
+SSE-C response headers are available through `FilePut`'s `Headers` and
+`FileDetails`'s `ExtraHeaders`.
+
+SSE-C requires HTTPS. Requests carrying keys refuse redirects to HTTP or another
+origin. For Garage, put a TLS reverse proxy in front of its HTTP API. The server
+receives the plaintext key, so SSE-C requires a trusted endpoint. Do not log keys,
+request headers, or signed POST forms/policies. Keep your own key-to-object/version
+mapping. On AWS, SSE-C must also be allowed by the bucket's encryption configuration.
+
+ #### Presigned requests with SSE-C
+
+```go
+headers, err := simples3.SSECustomerHeaders(key)
+if err != nil {
+    log.Fatal(err)
+}
+signedURL := s3.GeneratePresignedURL(simples3.PresignedInput{
+    Bucket:        "my-bucket",
+    ObjectKey:     "secret.txt",
+    Method:        "GET",
+    ExpirySeconds: 300,
+    ExtraHeaders:  headers,
+})
+```
+
+The requester must send those same headers over HTTPS; the URL alone is insufficient.
+Key values remain in headers and are never included in the URL. For multipart
+presigning, pass `headers` to `PresignedMultipartInput.ExtraHeaders` and send them
+with each part upload. Presigning returns an empty string for SSE-C on HTTP endpoints,
+consistent with its existing error behavior. Apply the same HTTPS/origin restrictions
+in the HTTP client you use to consume presigned URLs.
+
+The SSE-C protocol tests use local TLS servers and require no external service:
+
+```sh
+go test -race ./... -run '^TestSSEC'
+```
+
+`just test-local` also runs the SSE-C round trips against SeaweedFS through a
+local TLS test proxy. The proxy forwards only to the loopback fixture; its
+backend hop uses HTTP. It is strictly a test adapter, not a production TLS setup.
+
+To run directly against a real HTTPS endpoint, set `AWS_S3_ENDPOINT` (HTTPS),
+`AWS_S3_REGION`, `AWS_S3_ACCESS_KEY`, `AWS_S3_SECRET_KEY` and `AWS_S3_BUCKET`
+(an existing test bucket), then run:
+
+```sh
+SIMPLES3_SSE_C_INTEGRATION=1 go test -run '^TestSSECIntegration$' -v
+```
+
  #### Check Encryption Status
  
  ```go

@@ -22,6 +22,8 @@ type DownloadInput struct {
 	Bucket    string
 	ObjectKey string
 	VersionId string // Optional: Version ID of the object to download
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // DetailsInput is passed to FileDetails as a parameter.
@@ -29,6 +31,8 @@ type DetailsInput struct {
 	Bucket    string
 	ObjectKey string
 	VersionId string // Optional: Version ID of the object to retrieve details for
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
 }
 
 // DetailsResponse is returned by FileDetails.
@@ -72,6 +76,9 @@ type UploadInput struct {
 	// KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
 	SSEKMSKeyId string
 
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
+
 	Body io.ReadSeeker
 }
 
@@ -110,6 +117,9 @@ type DeleteInput struct {
 // FileDownload makes a GET call and returns a io.ReadCloser.
 // After reading the response body, ensure closing the response.
 func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
+	if err := validateSSECustomerKey(u.SSECustomerKey, "", ""); err != nil {
+		return nil, err
+	}
 	urlStr := s3.getURL(u.Bucket, u.ObjectKey)
 
 	if u.VersionId != "" {
@@ -133,11 +143,14 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 	if err := s3.renewIAMToken(); err != nil {
 		return nil, err
 	}
+	if err := setSSECustomerHeaders(req, u.SSECustomerKey, false); err != nil {
+		return nil, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return nil, err
 	}
 
-	res, err := s3.getClient().Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +164,9 @@ func (s3 *S3) FileDownload(u DownloadInput) (io.ReadCloser, error) {
 
 // FilePut makes a PUT call to S3.
 func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
+	if err := validateSSECustomerKey(u.SSECustomerKey, u.ServerSideEncryption, u.SSEKMSKeyId); err != nil {
+		return PutResponse{}, err
+	}
 	fSize, err := detectFileSize(u.Body)
 	if err != nil {
 		return PutResponse{}, err
@@ -208,14 +224,16 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 	if err := s3.renewIAMToken(); err != nil {
 		return PutResponse{}, err
 	}
+	if err := setSSECustomerHeaders(req, u.SSECustomerKey, false); err != nil {
+		return PutResponse{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return PutResponse{}, err
 	}
 
 	// debug(httputil.DumpRequest(req, true))
 	// Submit the request
-	client := s3.getClient()
-	res, err := client.Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return PutResponse{}, err
 	}
@@ -244,6 +262,9 @@ func (s3 *S3) FilePut(u UploadInput) (PutResponse, error) {
 // FileUpload makes a POST call with the file written as multipart
 // and on successful upload, checks for 200 OK.
 func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
+	if err := validateSSECustomerKey(u.SSECustomerKey, u.ServerSideEncryption, u.SSEKMSKeyId); err != nil {
+		return UploadResponse{}, err
+	}
 	fSize, err := detectFileSize(u.Body)
 	if err != nil {
 		return UploadResponse{}, err
@@ -260,6 +281,19 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 		MetaData: map[string]string{
 			"success_action_status": "201", // returns XML doc on success
 		},
+	}
+
+	if len(u.SSECustomerKey) > 0 {
+		if err := requireSSEHTTPS(uc.UploadURL); err != nil {
+			return UploadResponse{}, err
+		}
+		headers, err := SSECustomerHeaders(u.SSECustomerKey)
+		if err != nil {
+			return UploadResponse{}, err
+		}
+		for k, v := range headers {
+			uc.MetaData[k] = v
+		}
 	}
 
 	// Set custom metadata.
@@ -327,6 +361,9 @@ func (s3 *S3) FileUpload(u UploadInput) (UploadResponse, error) {
 
 	// Submit the request
 	client := s3.getClient()
+	if len(u.SSECustomerKey) > 0 {
+		client = sseCustomerClient(client)
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return UploadResponse{}, err
@@ -404,6 +441,9 @@ func (s3 *S3) FileDelete(u DeleteInput) error {
 }
 
 func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
+	if err := validateSSECustomerKey(u.SSECustomerKey, "", ""); err != nil {
+		return DetailsResponse{}, err
+	}
 	urlStr := s3.getURL(u.Bucket, u.ObjectKey)
 
 	if u.VersionId != "" {
@@ -428,11 +468,14 @@ func (s3 *S3) FileDetails(u DetailsInput) (DetailsResponse, error) {
 		return DetailsResponse{}, err
 	}
 
+	if err := setSSECustomerHeaders(req, u.SSECustomerKey, false); err != nil {
+		return DetailsResponse{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return DetailsResponse{}, err
 	}
 
-	res, err := s3.getClient().Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return DetailsResponse{}, err
 	}
@@ -527,6 +570,11 @@ type CopyObjectInput struct {
 
 	// Optional: KMS Key ID (ARN or ID) when ServerSideEncryption is "aws:kms"
 	SSEKMSKeyId string
+	// Optional: raw 32-byte SSE-C key. Requires HTTPS; do not modify during the call.
+	SSECustomerKey []byte
+
+	// Optional: raw 32-byte key used to decrypt the source object.
+	SourceSSECustomerKey []byte
 }
 
 // CopyObjectOutput is returned by CopyObject.
@@ -545,6 +593,12 @@ type copyObjectResult struct {
 // Can copy within the same bucket or across buckets.
 // This operation is server-side, avoiding download/upload cycle.
 func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
+	if err := validateSSECustomerKey(input.SSECustomerKey, input.ServerSideEncryption, input.SSEKMSKeyId); err != nil {
+		return CopyObjectOutput{}, err
+	}
+	if err := validateSSECustomerKey(input.SourceSSECustomerKey, "", ""); err != nil {
+		return CopyObjectOutput{}, err
+	}
 	// Validate required fields
 	if input.SourceBucket == "" || input.SourceKey == "" {
 		return CopyObjectOutput{}, fmt.Errorf("source bucket and key are required")
@@ -608,13 +662,18 @@ func (s3 *S3) CopyObject(input CopyObjectInput) (CopyObjectOutput, error) {
 	}
 
 	// Sign the request
+	if err := setSSECustomerHeaders(req, input.SSECustomerKey, false); err != nil {
+		return CopyObjectOutput{}, err
+	}
+	if err := setSSECustomerHeaders(req, input.SourceSSECustomerKey, true); err != nil {
+		return CopyObjectOutput{}, err
+	}
 	if err := s3.signRequest(req); err != nil {
 		return CopyObjectOutput{}, err
 	}
 
 	// Execute request
-	client := s3.getClient()
-	res, err := client.Do(req)
+	res, err := s3.doSSERequest(req)
 	if err != nil {
 		return CopyObjectOutput{}, err
 	}
