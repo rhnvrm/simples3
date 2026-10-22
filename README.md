@@ -747,65 +747,63 @@ if err != nil {
 
 ## Development
 
-### Setup Development Environment
+Local integration tests use the official `chrislusf/seaweedfs:4.48` image, pinned in
+`docker-compose.yml`. Docker Compose v2 is required. Nix supplies Go, Just and the
+AWS CLI:
 
 ```sh
-# Clone the repository
 git clone https://github.com/rhnvrm/simples3.git
 cd simples3
-
-# Using Nix (recommended)
 nix develop
-
-# Or using direnv
-direnv allow
-
-# Start local MinIO for testing
-just setup
-
-# Run tests
 just test-local
 ```
 
-### Testing
-
-The library includes comprehensive tests that run against a local MinIO instance:
-
-```sh
-# Run all tests (without MinIO)
-just test
-
-# Run tests with local MinIO
-just test-local
-
-# Run specific test
-go test -v -run TestList
-```
-
-### Available Commands
+`just test-local` starts SeaweedFS in its single-process `mini` mode with public
+test credentials and a pre-created `testbucket`, waits for authenticated bucket
+access, and runs a fresh, uncached Go suite with the race detector. The S3 API listens only on
+`127.0.0.1:9000`. The credentials in this fixture are public and strictly for local
+tests. Automatic bucket creation on upload and recursive bucket deletion are
+explicitly disabled to exercise ordinary S3 behavior.
 
 ```sh
-just              # List all commands
-just test         # Run tests without MinIO
-just test-local   # Run tests with MinIO (includes setup)
-just setup        # Setup development environment
-just minio-up      # Start MinIO container
-just minio-down    # Stop MinIO container
-just clean         # Clean up everything
-just status        # Check development environment status
+just setup           # Start SeaweedFS and wait for authenticated S3 readiness
+just seaweedfs-up    # Start the container without waiting for S3 readiness
+just seaweedfs-down  # Stop SeaweedFS, retain test data
+just seaweedfs-logs  # Follow server logs
+just seaweedfs-reset # Remove local test data and initialize a fresh fixture
+just test            # Run tests against the currently configured endpoint
+just vet
+just status
 ```
 
-## Environment Variables
+### Test coverage
 
-For development and testing:
+The existing integration suite runs against SeaweedFS, including ACLs, tagging,
+versioning and SSE-S3 tests. No backend-specific capability skips are added. The existing
+POST-tagging integration test remains skipped pending client/backend compatibility.
+`backend_protocol_test.go` additionally checks request headers, signed POST policy
+conditions, XML serialization, response parsing and version query parameters using
+local HTTP servers. Run these checks without an external S3 service:
+
+```sh
+go test -race ./... -run '^TestBackendProtocol'
+```
+
+To use another compatible test endpoint, configure its credentials and test bucket.
+Use a dedicated account and bucket: integration tests create and delete buckets
+and objects.
 
 ```sh
 export AWS_S3_REGION="us-east-1"
-export AWS_S3_ACCESS_KEY="minioadmin"
-export AWS_S3_SECRET_KEY="minioadmin"
-export AWS_S3_ENDPOINT="http://localhost:9000"
-export AWS_S3_BUCKET="testbucket"
+export AWS_S3_ACCESS_KEY="your-access-key"
+export AWS_S3_SECRET_KEY="your-secret-key"
+export AWS_S3_ENDPOINT="https://your-test-endpoint"
+export AWS_S3_BUCKET="your-test-bucket"
+go test -v ./...
 ```
+
+Local fixture values shared by Nix, setup and test commands are defined in
+`scripts/seaweedfs-env.sh` and match the public values in Compose.
 
 ## Contributing
 
@@ -818,3 +816,4 @@ Rohan Verma <hello@rohanverma.net>
 ## License
 
 BSD-2-Clause-FreeBSD
+

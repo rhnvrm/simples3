@@ -19,10 +19,12 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Run Tests via Justfile
-        env:
-          AWS_S3_BUCKET: testbucket
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin
-          AWS_S3_ENDPOINT: http://127.0.0.1:9000
-          AWS_EC2_METADATA_DISABLED: "true"
         run: nix develop --command just test-local
+
+      - name: SeaweedFS diagnostics
+        if: failure()
+        run: docker compose logs seaweedfs
+
+      - name: Stop SeaweedFS
+        if: always()
+        run: docker compose down --volumes

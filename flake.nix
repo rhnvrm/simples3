@@ -42,19 +42,8 @@
             export GOPATH=$(go env GOPATH)
             export PATH=$PATH:$GOPATH/bin
 
-            # Local S3 (MinIO) configuration for testing
-            export AWS_S3_BUCKET=testbucket
-            export AWS_S3_ENDPOINT=http://localhost:9000
-            export AWS_S3_REGION=us-east-1
-            export AWS_EC2_METADATA_DISABLED=true
-
-            # AWS CLI credentials for MinIO
-            export AWS_ACCESS_KEY_ID=minioadmin
-            export AWS_SECRET_ACCESS_KEY=minioadmin
-
-            # Simples3 library credentials
-            export AWS_S3_ACCESS_KEY=minioadmin
-            export AWS_S3_SECRET_KEY=minioadmin
+            # Shared public test-fixture settings for the CLI and the Go tests.
+            source ${./scripts/seaweedfs-env.sh}
           '';
         };
       });
