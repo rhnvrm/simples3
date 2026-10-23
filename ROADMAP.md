@@ -73,44 +73,56 @@ This release consolidates all previously planned feature sets (v0.11.0 - v0.16.0
 
 ---
 
-## v0.12.0 - CLI Complete
-**Scope**: Full-featured CLI with all library features
+## v0.12.0 - First CLI Release
+**Scope**: A practical S3 CLI built on the completed library, intentionally smaller than `mc`
 **Size**: Large (~2000 LOC)
 
 CLI (`cmd/simples3/`):
-- [ ] Project structure (cobra or custom parser)
-- [ ] S3 URI parsing (`s3://bucket/key`)
-- [ ] Config (env vars: AWS_*, flags: --region/--profile)
-- [ ] AWS credentials file support (~/.aws/credentials)
-- [ ] Basic commands:
-  - [ ] ls (list buckets/objects)
-  - [ ] cp (upload/download, with multipart for large files)
-  - [ ] rm (delete single/batch)
-  - [ ] mb (make bucket)
-  - [ ] rb (remove bucket)
-  - [ ] mv (move/rename using copy+delete)
-  - [ ] presign (generate URL)
-  - [ ] sync (local ↔ S3 with diff algorithm)
-- [ ] Flags:
-  - [ ] --recursive (cp/rm)
-  - [ ] --sse/--sse-kms-key-id (encryption)
-  - [ ] --tags (tagging)
-  - [ ] --version-id (versioning)
-  - [ ] --acl (canned ACLs)
-  - [ ] --delete (sync)
-  - [ ] --exclude/--include (patterns)
-  - [ ] --json (output mode)
-  - [ ] --dry-run
-- [ ] Features:
+- [ ] Project structure
+- [ ] S3 URI parsing (`s3://bucket/key`) plus clear local path handling
+- [ ] Config and auth:
+  - [ ] Environment variables (`AWS_*`)
+  - [ ] Flags (`--region`, `--profile`)
+  - [ ] AWS credentials file support (`~/.aws/credentials`)
+- [ ] Core commands:
+  - [ ] `ls` (clear bucket vs object listing)
+  - [ ] `cp` (local ↔ S3, S3 ↔ S3, multipart for large files)
+  - [ ] `rm` (single and batch delete)
+  - [ ] `mb` (make bucket)
+  - [ ] `rb` (remove bucket)
+  - [ ] `mv` (move/rename using copy + delete)
+  - [ ] `presign` (generate URL)
+  - [ ] `sync` (minimal local ↔ S3 sync with size + modtime diff, optional `--delete`, and one-way source-of-truth behavior from source to destination)
+- [ ] Core flags:
+  - [ ] `--recursive` (`cp`, `rm`, `sync`)
+  - [ ] `--dry-run` (`cp`, `rm`, `mv`, `sync`)
+  - [ ] `--json` (commands that naturally emit structured result output)
+  - [ ] `--delete` (`sync`)
+  - [ ] `--exclude` / `--include` (`sync`, plus recursive transfer flows if kept simple)
+- [ ] Thin operation-level flags backed by existing library support:
+  - [ ] `--sse`
+  - [ ] `--sse-kms-key-id`
+  - [ ] `--version-id` for commands that already have a natural single-object version target
+  - [ ] `--acl` for simple canned ACL usage where it does not introduce a broader ACL management surface
+- [ ] UX:
   - [ ] Progress indicators
-  - [ ] Parallel transfers
   - [ ] Better error messages
-- [ ] Subcommands:
-  - [ ] acl get/set
-  - [ ] lifecycle get/set/delete
-  - [ ] tags get/set/delete
+  - [ ] Parallel transfers where they materially improve large uploads/downloads
 
-**Why**: Library complete. Build full-featured CLI supporting all operations.
+**Execution order inside v0.12.0**:
+1. CLI skeleton, config/auth, URI parsing
+2. `ls`, `cp`, `rm`, `mb`, `rb`, `mv`, `presign` with command-appropriate recursive/json/dry-run support
+3. Minimal `sync`, filters, progress, and error polish
+
+**Non-goals for the initial CLI roadmap**:
+- Dedicated `acl` subcommands or broader ACL management workflows
+- `lifecycle get/set/delete`
+- `tags get/set/delete`
+- Exhaustive versioning workflows beyond the narrow command flags above
+- `mc`-style long-tail transfer knobs
+- Advanced sync heuristics beyond a simple, predictable first implementation
+
+**Why**: Library complete. Ship one useful CLI release without turning `simples3` into `mc`.
 
 ---
 
@@ -126,14 +138,14 @@ Library:
 
 CLI:
 - [ ] CLI tests with real/mocked S3
-- [ ] CLI documentation (man pages, --help)
-- [ ] Installation guides (brew, apt, etc.)
-- [ ] Shell completions (bash, zsh, fish)
+- [ ] Command help and examples complete
+- [ ] Installation and usage docs complete
+- [ ] Cross-platform sanity checks (macOS, Linux, Windows)
 
 Release:
 - [ ] CHANGELOG.md complete
 - [ ] Migration guide from v0.x
-- [ ] Examples for all features
+- [ ] Examples for core library and CLI workflows
 - [ ] API stability guarantee
 
-**Why**: v1.0 = stability commitment. Library + CLI production-ready.
+**Why**: v1.0 = stability commitment. The command set should be defined by v0.12.0; v1.0 is about locking it down, documenting it, and proving it works.
