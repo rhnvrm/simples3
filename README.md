@@ -733,6 +733,32 @@ s3 := simples3.New("nyc3", "your-access-key", "your-secret-key")
 s3.SetEndpoint("https://nyc3.digitaloceanspaces.com")
 ```
 
+### Addressing Style
+
+`Bucket` remains required for bucket-scoped operations. Addressing style is a client setting, not a bucketless API mode.
+
+By default, simples3 preserves its legacy behavior for compatibility:
+- runtime requests use path-style URLs
+- presigned URLs keep their historical default behavior
+- direct `CreateUploadPolicies()` defaults keep their historical action URL behavior
+
+To explicitly control addressing style across supported surfaces, use `SetUsePathStyle`:
+
+```go
+// Force path-style addressing
+s3 := simples3.New("us-east-1", "your-access-key", "your-secret-key")
+s3.SetUsePathStyle(true)
+
+// Opt into virtual-hosted-style addressing when the bucket/endpoint is compatible
+s3.SetUsePathStyle(false)
+```
+
+When virtual-hosted-style is explicitly enabled, simples3 safely falls back to path-style for incompatible cases such as:
+- dotted bucket names over HTTPS
+- localhost or IP-based endpoints
+- endpoints with a path prefix (for example `https://example.com/base`)
+- non-DNS-compatible bucket names
+
 ### IAM Credentials
 
 On EC2 instances, use IAM roles automatically:

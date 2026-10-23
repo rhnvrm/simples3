@@ -5,7 +5,6 @@ package simples3
 
 import (
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/url"
 	"regexp"
@@ -17,20 +16,8 @@ import (
 // getURL constructs a URL for a given path, with multiple optional
 // arguments as individual subfolders, based on the endpoint
 // specified in s3 struct.
-func (s3 *S3) getURL(path string, args ...string) (uri string) {
-	if len(args) > 0 {
-		path += "/" + strings.Join(args, "/")
-	}
-	// need to encode special characters in the path part of the URL
-	encodedPath := encodePath(path)
-
-	if len(s3.Endpoint) > 0 {
-		uri = s3.Endpoint + "/" + encodedPath
-	} else {
-		uri = fmt.Sprintf(s3.URIFormat, s3.Region, encodedPath)
-	}
-
-	return uri
+func (s3 *S3) getURL(path string, args ...string) string {
+	return s3.resolveAddress(addressingSurfaceRuntime, path, args...).urlString()
 }
 
 func detectFileSize(body io.Seeker) (int64, error) {
