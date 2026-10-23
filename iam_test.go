@@ -6,11 +6,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestS3_NewUsingIAM(t *testing.T) {
+	unsetEnvForTest(t, ecsContainerCredentialsEnv)
+
 	var (
 		iam  = `test-new-s3-using-iam`
 		resp = `{"Code" : "Success","LastUpdated" : "2018-12-24T10:18:01Z",
@@ -107,4 +111,134 @@ func TestS3_NewUsingIAM(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
+}
+
+func TestFetchIAMDataForEcs(t *testing.T) {
+	oldBaseURL := ecsContainerCredentialsBaseURL
+	ecsContainerCredentialsBaseURL = ""
+	t.Cleanup(func() {
+		ecsContainerCredentialsBaseURL = oldBaseURL
+	})
+
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", r.Method)
+			}
+			if r.URL.EscapedPath() != "/ecs/creds" {
+				t.Fatalf("unexpected path: %s", r.URL.EscapedPath())
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, `{"AccessKeyId":"ecs-access","SecretAccessKey":"ecs-secret","Token":"ecs-token","Expiration":"2018-12-24T16:24:59Z"}`)
+		}))
+		defer server.Close()
+
+		ecsContainerCredentialsBaseURL = server.URL
+		os.Setenv(ecsContainerCredentialsEnv, "/ecs/creds")
+		defer os.Unsetenv(ecsContainerCredentialsEnv)
+
+		resp, err := fetchIAMDataForEcs(server.Client())
+		if err != nil {
+			t.Fatalf("fetchIAMDataForEcs() error = %v", err)
+		}
+
+		if resp.AccessKeyID != "ecs-access" || resp.SecretAccessKey != "ecs-secret" || resp.Token != "ecs-token" {
+			t.Fatalf("unexpected ECS credentials: %+v", resp)
+		}
+	})
+
+	t.Run("non-200 does not fall back to IMDS", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `forbidden`)
+		}))
+		defer server.Close()
+
+		ecsContainerCredentialsBaseURL = server.URL
+		os.Setenv(ecsContainerCredentialsEnv, "/ecs/creds")
+		defer os.Unsetenv(ecsContainerCredentialsEnv)
+
+		_, err := fetchIAMData(server.Client(), "http://should-not-be-used")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "error fetching IAM ECS data") {
+			t.Fatalf("expected ECS error, got %v", err)
+		}
+	})
+}
+
+func TestFetchIAMDataFallsBackToIMDSWhenECSIsUnavailable(t *testing.T) {
+	unsetEnvForTest(t, ecsContainerCredentialsEnv)
+
+	var (
+		iam           = `test-new-s3-using-iam`
+		resp          = `{"Code":"Success","LastUpdated":"2018-12-24T10:18:01Z","Type":"AWS-HMAC","AccessKeyId":"abc","SecretAccessKey":"abc","Token":"abc","Expiration":"2018-12-24T16:24:59Z"}`
+		respIMDSToken = `AQAEAJWopi8yvjKYXyWJbzESE0cms-OoTnptJzS3M9g5iNcl06UEkQ==`
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			if r.URL.EscapedPath() != imdsTokenURI {
+				t.Fatalf("unexpected token path: %s", r.URL.EscapedPath())
+			}
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, respIMDSToken)
+		case http.MethodGet:
+			if r.Header.Get(imdsTokenHeader) == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			switch r.URL.EscapedPath() {
+			case securityCredentialsURI:
+				w.WriteHeader(http.StatusOK)
+				io.WriteString(w, iam)
+			case securityCredentialsURI + iam:
+				w.WriteHeader(http.StatusOK)
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, resp)
+			default:
+				t.Fatalf("unexpected IMDS path: %s", r.URL.EscapedPath())
+			}
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	respData, err := fetchIAMData(server.Client(), server.URL)
+	if err != nil {
+		t.Fatalf("fetchIAMData() error = %v", err)
+	}
+
+	if respData.AccessKeyID != "abc" || respData.SecretAccessKey != "abc" || respData.Token != "abc" {
+		t.Fatalf("unexpected IMDS credentials: %+v", respData)
+	}
+	if respData.Code != "Success" || respData.Type != "AWS-HMAC" {
+		t.Fatalf("expected legacy IAMResponse fields to remain populated, got %+v", respData)
+	}
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+
+	oldValue, hadValue := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("failed to unset %s: %v", key, err)
+	}
+
+	t.Cleanup(func() {
+		if hadValue {
+			if err := os.Setenv(key, oldValue); err != nil {
+				t.Fatalf("failed to restore %s: %v", key, err)
+			}
+			return
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("failed to cleanup %s: %v", key, err)
+		}
+	})
 }
